@@ -29,6 +29,6 @@ In the second half of 2018 I have attained the "vExpert" status for the first ti
 
 You can find me on twitter, xing, linkedin, slack, VMware communities or just hit me up in the comments on one of my posts.
 
-[caption id="attachment_2" align="aligncenter" width="294"][![VCAP Logo](https://virtualfrog.files.wordpress.com/2014/11/vcap-dca.jpg?w=294)](https://virtualfrog.files.wordpress.com/2014/11/vcap-dca.jpg) VMware Certified Advanced Professional - Data Center Administration[/caption]
+[![VCAP Logo](https://virtualfrog.files.wordpress.com/2014/11/vcap-dca.jpg?w=294)](https://virtualfrog.files.wordpress.com/2014/11/vcap-dca.jpg) VMware Certified Advanced Professional - Data Center Administration[/caption]
 
-[caption id="attachment_386" align="aligncenter" width="352"]![vmware_milestone_DCV_expert](https://virtualfrog.files.wordpress.com/2014/11/vmware_milestone_dcv_expert.png) Milestone for VCIX achieved in december 2016[/caption]
+[vmware_milestone_DCV_expert](https://virtualfrog.files.wordpress.com/2014/11/vmware_milestone_dcv_expert.png) Milestone for VCIX achieved in december 2016[/caption]
