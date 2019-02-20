@@ -1,1 +1,27 @@
-theme: jekyll-theme-modernist
+# Welcome to Jekyll!
+#
+# This config file is meant for settings that affect your whole blog, values
+# which you are expected to set up once and rarely need to edit after that.
+# For technical reasons, this file is *NOT* reloaded automatically when you use
+# 'jekyll serve'. If you change this file, please restart the server process.
+
+# Site settings
+title: Daily virtual life of an VMware enthusiast
+email: dario.doerflinger@gmail.com
+description: Blogging about my tech passions that include PowerCLI, VMware vSphere, vSAN, LogInsight, Operations
+baseurl: "" # the subpath of your site, e.g. /blog
+url: "http://virtualfrog.github.io" # the base hostname & protocol for your site
+twitter_username: virutal_frog
+github_username: virtualFrog
+clarity_header_iconshape: dna
+google_analytics: 
+disqus_shortname: 
+plugins: 
+# Build settings
+markdown: kramdown
+exclude: ['node_modules','package.json','.settings','.project','about_english.md','404.md']
+compress_html: 
+blanklines: true
+sass: 
+style: :expanded # You might prefer to minify using :compressed
+
