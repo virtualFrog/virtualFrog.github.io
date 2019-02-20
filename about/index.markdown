@@ -31,4 +31,4 @@ You can find me on twitter, xing, linkedin, slack, VMware communities or just hi
 
 [![VCAP Logo](https://virtualfrog.files.wordpress.com/2014/11/vcap-dca.jpg?w=294)](https://virtualfrog.files.wordpress.com/2014/11/vcap-dca.jpg) VMware Certified Advanced Professional - Data Center Administration[/caption]
 
-[vmware_milestone_DCV_expert](https://virtualfrog.files.wordpress.com/2014/11/vmware_milestone_dcv_expert.png) Milestone for VCIX achieved in december 2016[/caption]
+[![vmware_milestone_DCV_expert](https://virtualfrog.files.wordpress.com/2014/11/vmware_milestone_dcv_expert.png) Milestone for VCIX achieved in december 2016[/caption]
