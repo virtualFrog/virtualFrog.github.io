@@ -6,22 +6,31 @@
 # 'jekyll serve'. If you change this file, please restart the server process.
 
 # Site settings
-title: Daily virtual life of an VMware enthusiast
+title: Daily virtual life
 email: dario.doerflinger@gmail.com
-description: Blogging about my tech passions that include PowerCLI, VMware vSphere, vSAN, LogInsight, Operations
+description: > # this means to ignore newlines until "baseurl:"
+  Here I'll blog about tech passions with VMware focus...
 baseurl: "" # the subpath of your site, e.g. /blog
 url: "http://virtualfrog.github.io" # the base hostname & protocol for your site
-twitter_username: virutal_frog
-github_username: virtualFrog
+twitter_username: virtual_frog
+github_username:  virtualFrog
 clarity_header_iconshape: dna
-google_analytics: 
+google_analytics:
 disqus_shortname: 
-plugins: 
+
+plugins:
+  - jekyll-mentions
+  - jekyll-gist
+  - jekyll-sitemap
+  - jekyll-avatar
+  - jekyll-feed
+
 # Build settings
 markdown: kramdown
-exclude: ['node_modules','package.json','.settings','.project','about_english.md','404.md']
-compress_html: 
-blanklines: true
-sass: 
-style: :expanded # You might prefer to minify using :compressed
 
+exclude: ['node_modules','package.json','.settings','.project','about_english.md','404.md']
+compress_html:
+  blanklines: true
+
+sass:
+  style: :expanded # You might prefer to minify using :compressed
