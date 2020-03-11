@@ -1,0 +1,491 @@
+---
+layout: post
+title: 'PowerCLI: Automating VMware Tools and Hardware Upgrades'
+date: 2017-07-24 12:43:31.000000000 +02:00
+type: post
+parent_id: '0'
+published: true
+password: ''
+status: publish
+categories:
+- Scripting
+- virtualFrog Posts
+- VMware
+tags:
+- PowerCLI
+meta:
+  _thumbnail_id: '29'
+  _rest_api_published: '1'
+  _rest_api_client_id: "-1"
+  _publicize_job_id: '7427939199'
+  _publicize_done_external: a:1:{s:7:"twitter";a:1:{i:9383931;s:56:"https://twitter.com/virtual_dd/status/889435878342483968";}}
+  _publicize_done_9340485: '1'
+  _wpas_done_9383931: '1'
+  publicize_twitter_user: virtual_dd
+  publicize_linkedin_url: https://www.linkedin.com/updates?discuss=&scope=391645417&stype=M&topic=6295201574692098048&type=U&a=wrsJ
+  _publicize_done_14862392: '1'
+  _wpas_done_14749148: '1'
+author:
+  login: virtualfrog
+  email: dario.doerflinger@gmail.com
+  display_name: virtualFrog
+  first_name: ''
+  last_name: ''
+permalink: "/2017/07/24/powercli-automating-vmware-tools-and-hardware-upgrades/"
+---
+<p>A couple of years ago I struggled with VMware Update Manager in a large environment. The Use case was to update about a 1000 VMs to the latest VMware Tools and VM Version (hardware). The VUM did not do the job and froze in the middle of the job. Unfortunately due to the Shutdowns and reboots required to to achieve this we only had a small windows to achieve this in. After one unsuccessful attempt to do this with the VUM we decided to script it.</p>
+<p>The original script was published in 2009 somewhere (source in the script) and we took that script and added some features (like doing a snapshot before installation on a linux-vm) and recently I have updated the script to work with the latest VM version (13 from vSphere 6.5).</p>
+<p><!--more--></p>
+<p>Update: this script is now published at <a href="https://github.com/virtualFrog/PowerCLI-Scripts" target="_blank" rel="noopener">GitHub</a>.</p>
+<h2>The Script</h2>
+<p>[code language="powershell"]<br />
+#####################################################################################################################<br />
+# Author:           Bechtle Schweiz AG, Dario Doerflinger (c) 2015-2017<br />
+# Skript:           Update_VMs_1.0.4.ps1<br />
+# Datum:            24.07.2017<br />
+# Version:          1.0.4<br />
+# Original Author:  AFokkema: http://ict-freak.nl/2009/07/15/powercli-upgrading-vhardware-to-vsphere-part-2-vms/<br />
+# Changelog:<br />
+#                   - Improved Readability and added a general variables section<br />
+#                   - Addedd functionality to upgrade VM Version 7 VMs<br />
+#                   - Added Snapshot Mechanism to enable Linux Tools Upgrade<br />
+#                   - Added functionality to upgrade VM Versions to 11<br />
+#                   - Added functionality to upgrade VM Versions to 13 (12 is only for Desktop products)<br />
+#                   - Changed Add-Snapin to Import Module (not relevant for PowerCLI 6.5.1)<br />
+#<br />
+# Summary:          This script will upgrade the VMWare Tools level and the hardware level from VMs<br />
+#####################################################################################################################<br />
+clear<br />
+Write-Host " "<br />
+Write-Host " "<br />
+Write-Host "######################## Update_VMs_1.0.4.ps1 ##########################"<br />
+Write-Host " "<br />
+Write-Host "            this script updates  VMware Tools und hardware."<br />
+Write-Host " "<br />
+Write-Host "######################################################################"<br />
+Write-Host " "</p>
+<p>Import-Module -Name VMware.VimAutomation.Core -ErrorAction SilentlyContinue | Out-Null<br />
+# This script adds some helper functions and sets the appearance.<br />
+#"C:\Program Files (x86)\VMware\Infrastructure\vSphere PowerCLI\Scripts\Initialize-PowerCliEnvironment.ps1"</p>
+<p># Variables<br />
+$vCenter = Read-Host "Enter your vCenter servername"<br />
+#$Folder = Read-Host "Enter the name of the folder where the VMs are stored"<br />
+$timestamp = Get-Date -format "yyyyMMdd-HH.mm"<br />
+# Note: enter the csv file without extension:<br />
+$csvfile = "c:\tmp\$timestamp-vminfo.csv"<br />
+$logFile = "c:\tmp\vm-update.log"</p>
+<p>#Rotate the Logfile<br />
+if (Test-Path $logFile)<br />
+{<br />
+    if (Test-Path c:\tmp\old_vm-update.log)<br />
+    {<br />
+        Remove-Item -Path c:\tmp\old_vm-update.log -Force -Confirm:$false<br />
+    }<br />
+    Rename-Item -Path $logfile -NewName old_vm-update.log -Force -Confirm:$false<br />
+}</p>
+<p>#LogFunction: Standard at Coop!<br />
+function LogWrite<br />
+{<br />
+    #Aufruf: LogWrite "Tobi ist doof" "INFO" "1"<br />
+    Param([string]$logString, [string]$logLevel, [string]$priority)<br />
+    $nowDate = Get-Date -Format dd.MM.yyyy<br />
+    $nowTime = Get-Date -Format HH:mm:ss</p>
+<p>    if ($logLevel -eq "EMPTY")<br />
+    {<br />
+        Add-Content $logFile -value "$logstring"<br />
+        Write-Host $logString<br />
+    } else {<br />
+        Add-Content $logFile -value "[$logLevel][Prio: $priority][$nowDate][$nowTime] - $logString"<br />
+        Write-Host "[$logLevel][Prio: $priority][$nowDate][$nowTime] - $logString"</p>
+<p>    }</p>
+<p>}</p>
+<p>################################################################<br />
+#       Einlesen der Cred fuer vCenter und ESXi Server          #<br />
+################################################################<br />
+#$vcCred = C:\vm-scripts\Get-myCredential.ps1 butob C:\vm-scripts\credentials<br />
+#$esxCred = C:\vm-scripts\Get-myCredential.ps1 root C:\vm-scripts\host-credential</p>
+<p>###############################################################<br />
+#                  Prompt for Credentials                      #<br />
+################################################################<br />
+$vcCred = $host.ui.PromptForCredential("VCENTER LOGIN", "Provide VCENTER credentials (administrator privileges)", "", "")<br />
+#$esxCred = $host.ui.PromptForCredential("ESX HOST LOGIN", "Provide ESX host credentials (probably root)", "root", "")</p>
+<p>Function Make-Snapshot($vm)<br />
+{<br />
+  $snapshot = New-Snapshot -VM $vm -Name "BeforeUpgradeVMware" -Description "Snapshot taken before Tools and Hardware was updated" -Confirm:$false</p>
+<p>}</p>
+<p>Function Delete-Snap()<br />
+{<br />
+  get-vm | get-snapshot -Name "BeforeUpgradeVMware" | Remove-Snapshot -Confirm:$false<br />
+  # $snapshot = Get-Snapshot -Name "BeforeUpgradeVMware" -VM $vm<br />
+  # Remove-Snapshot -Snapshot $snapshot -Confirm:$false<br />
+}</p>
+<p>Function VM-Selection<br />
+{<br />
+   $sourcetype = Read-Host "Do you want to upgrade AllVMs, a VM, Folder, ResourcePool or from a VMfile?"<br />
+   if($sourcetype -eq "AllVMs")<br />
+   {<br />
+      $abort = Read-Host "You've chosen $sourcetype, this is your last chance to abort by pressing +C. Press  to continue selecting old hardware VMs"<br />
+      #$vms = Get-VM | Get-View | Where-Object {-not $_.config.template -and $_.Config.Version -eq "vmx-08" } | Select Name<br />
+      $vms = Get-VM | Get-View | Where-Object {-not $_.config.template} | Select Name<br />
+   }<br />
+   else<br />
+   {<br />
+      $sourcename = Read-Host "Give the name of the object or inputfile (full path) you want to upgrade"<br />
+      if($sourcetype -eq "VM")<br />
+      {<br />
+        $abort = Read-Host "You've chosen $sourcetype, this is your last chance to abort by pressing +C. Press  to continue selecting old hardware VMs"<br />
+        #$vms = Get-VM $sourcename | Get-View | Where-Object {-not $_.config.template -and $_.Config.Version -eq "vmx-08" } | Select Name<br />
+        $vms = Get-VM $sourcename | Get-View | Where-Object {-not $_.config.template} | Select Name<br />
+      }<br />
+      elseif($sourcetype -eq "Folder")<br />
+      {<br />
+        $abort = Read-Host "You've chosen $sourcetype, this is your last chance to abort by pressing +C. Press  to continue selecting old hardware VMs"<br />
+        #$vms = Get-Folder $sourcename | Get-VM  | Get-View | Where-Object {-not $_.config.template -and $_.Config.Version -eq "vmx-08" } | Select Name<br />
+        $vms = Get-Folder $sourcename | Get-VM  | Get-View | Where-Object {-not $_.config.template} | Select Name<br />
+      }<br />
+      elseif($sourcetype -eq "ResourcePool")<br />
+      {<br />
+        $abort = Read-Host "You've chosen $sourcetype, this is your last chance to abort by pressing +C. Press  to continue selecting old hardware VMs"<br />
+        #$vms = Get-ResourcePool $sourcename | Get-VM  | Get-View | Where-Object {-not $_.config.template -and $_.Config.Version -eq "vmx-08" } | Select Name<br />
+        $vms = Get-ResourcePool $sourcename | Get-VM  | Get-View | Where-Object {-not $_.config.template} | Select Name<br />
+      }<br />
+      elseif(($sourcetype -eq "VMfile") -and ((Test-Path -path $sourcename) -eq $True))<br />
+      {<br />
+        $abort = Read-Host "You've chosen $sourcetype with this file: $sourcename, this is your last chance to abort by pressing +C. Press  to continue selecting old hardware VMs"<br />
+        #$list = Get-Content $sourcename | Foreach-Object {Get-VM $_ | Get-View | Where-Object {-not $_.config.template -and $_.Config.Version -eq "vmx-08" } | Select Name }<br />
+        $list = Get-Content $sourcename | Foreach-Object {Get-VM $_ | Get-View | Where-Object {-not $_.config.template} | Select Name }<br />
+        $vms = $list<br />
+      }<br />
+      else<br />
+      {<br />
+         Write-Host "$sourcetype is not an exact match of AllVMs, VM, Folder, ResourcePool or VMfile, or the VMfile does not exist. Exit the script by pressing +C and try again."<br />
+      }<br />
+   }<br />
+   return $vms<br />
+}</p>
+<p>Function PowerOn-VM($vm)<br />
+{<br />
+   Start-VM -VM $vm -Confirm:$false -RunAsync | Out-Null<br />
+   Write-Host "$vm is starting!" -ForegroundColor Yellow<br />
+   sleep 10</p>
+<p>   do<br />
+   {<br />
+    $vmview = get-VM $vm | Get-View<br />
+    $getvm = Get-VM $vm<br />
+    $powerstate = $getvm.PowerState<br />
+    $toolsstatus = $vmview.Guest.ToolsStatus</p>
+<p>    Write-Host "$vm is starting, powerstate is $powerstate and toolsstatus is $toolsstatus!" -ForegroundColor Yellow<br />
+    sleep 5<br />
+    #NOTE that if the tools in the VM get the state toolsNotRunning this loop will never end. There needs to be a timekeeper variable to make sure the loop ends</p>
+<p>    }until(($powerstate -match "PoweredOn") -and (($toolsstatus -match "toolsOld") -or ($toolsstatus -match "toolsOk") -or ($toolsstatus -match "toolsNotInstalled")))</p>
+<p>    if (($toolsstatus -match "toolsOk") -or ($toolsstatus -match "toolsOld"))<br />
+    {<br />
+      $Startup = "OK"<br />
+      Write-Host "$vm is started and has ToolsStatus $toolsstatus"<br />
+    }<br />
+    else<br />
+    {<br />
+      $Startup = "ERROR"<br />
+      [console]::ForegroundColor = "Red"<br />
+      Read-Host "The ToolsStatus of $vm is $toolsstatus. This is unusual. Press +C to quit the script or press  to continue"<br />
+      LogWrite "PowerOn Error detected on $vm" "ERROR" "1"<br />
+      [console]::ResetColor()<br />
+    }<br />
+    return $Startup<br />
+}</p>
+<p>Function PowerOff-VM($vm)<br />
+{<br />
+   Shutdown-VMGuest -VM $vm -Confirm:$false | Out-Null<br />
+   Write-Host "$vm is stopping!" -ForegroundColor Yellow<br />
+   sleep 10</p>
+<p>   do<br />
+   {<br />
+      $vmview = Get-VM $vm | Get-View<br />
+      $getvm = Get-VM $vm<br />
+      $powerstate = $getvm.PowerState<br />
+      $toolsstatus = $vmview.Guest.ToolsStatus</p>
+<p>      Write-Host "$vm is stopping with powerstate $powerstate and toolsStatus $toolsstatus!" -ForegroundColor Yellow<br />
+      sleep 5</p>
+<p>   }until($powerstate -match "PoweredOff")</p>
+<p>   if (($powerstate -match "PoweredOff") -and (($toolsstatus -match "toolsNotRunning") -or ($toolsstatus -match "toolsNotInstalled")))<br />
+   {<br />
+      $Shutdown = "OK"<br />
+      Write-Host "$vm is powered-off"<br />
+   }<br />
+   else<br />
+   {<br />
+      $Shutdown = "ERROR"<br />
+      [console]::ForegroundColor = "Red"<br />
+      Read-Host "The ToolsStatus of $vm is $toolsstatus. This is unusual. Press +C to quit the script or press  to continue"<br />
+      LogWrite "PowerOff Error detected on $vm" "ERROR" "1"<br />
+      [console]::ResetColor()<br />
+   }<br />
+   return $Shutdown<br />
+}</p>
+<p>Function Check-ToolsStatus($vm)<br />
+{<br />
+    $vmview = get-VM $vm | Get-View<br />
+    $status = $vmview.Guest.ToolsStatus</p>
+<p>    if ($status -match "toolsOld")<br />
+    {<br />
+      $vmTools = "Old"<br />
+    }<br />
+    elseif($status -match "toolsNotRunning")<br />
+    {<br />
+      $vmTools = "NotRunning"<br />
+    }<br />
+    elseif($status -match "toolsNotInstalled")<br />
+    {<br />
+      $vmTools = "NotInstalled"<br />
+    }<br />
+    elseif($status -match "toolsOK")<br />
+    {<br />
+      $vmTools = "OK"<br />
+    }<br />
+    else<br />
+    {<br />
+      $vmTools = "ERROR"<br />
+      Read-Host "The ToolsStatus of $vm is $vmTools. Press +C to quit the script or press  to continue"<br />
+      LogWrite "VMware Tools Error detected on $vm" "ERROR" "1"<br />
+    }<br />
+   return $vmTools<br />
+}</p>
+<p>Function Check-VMHardwareVersion($vm)<br />
+{<br />
+    $vmView = get-VM $vm | Get-View<br />
+    $vmVersion = $vmView.Config.Version<br />
+    $v7 = "vmx-07"<br />
+    $v8 = "vmx-08"<br />
+    $v9 = "vmx-09"<br />
+    $v10 = "vmx-10"<br />
+    $v11 = "vmx-11"<br />
+    $v13 = "vmx-13"<br />
+    if ($vmVersion -eq $v8)<br />
+    {<br />
+      $vmHardware = "Old"<br />
+    }<br />
+    elseif($vmVersion -eq $v7)<br />
+    {<br />
+      $vmHardware = "Old"<br />
+    }<br />
+    elseif($vmVersion -eq $v9)<br />
+    {<br />
+      $vmHardware = "Old"<br />
+    }<br />
+    elseif($vmVersion -eq $v10)<br />
+    {<br />
+      $vmHardware = "Old"<br />
+    }<br />
+    elseif($vmVersion -eq $v11)<br />
+    {<br />
+      $vmHardware = "Old"<br />
+    }<br />
+    elseif($vmVersion -eq $v13)<br />
+    {<br />
+      $vmHardware = "Ok"<br />
+    }<br />
+    else<br />
+    {<br />
+      $vmHardware = "ERROR"<br />
+      LogWrite "Hardware Version Error detected on $vm" "ERROR" "1"<br />
+      [console]::ForegroundColor = "Red"<br />
+      Read-Host "The Hardware version of $vm is not set to $v7 or $v8 or $v9 or $v10 or $v11 or $v13. This is unusual. Press +C to quit the script or press  to continue"<br />
+      [console]::ResetColor()<br />
+    }<br />
+    return $vmHardware<br />
+}</p>
+<p>Function Upgrade-VMHardware($vm)<br />
+{<br />
+  $vmview = Get-VM $vm | Get-View<br />
+  $vmVersion = $vmView.Config.Version<br />
+  $v7 = "vmx-07"<br />
+  $v8 = "vmx-08"<br />
+  $v9 = "vmx-09"<br />
+  $v10 = "vmx-10"<br />
+  $v11 = "vmx-11"<br />
+  $v13 = "vmx-13"</p>
+<p>  if ($vmVersion -eq $v7)<br />
+  {<br />
+    Write-Host "Version 7 detected" -ForegroundColor Red</p>
+<p>    # Update Hardware<br />
+    Write-Host "Upgrading Hardware on" $vm -ForegroundColor Yellow<br />
+    Get-View ($vmView.UpgradeVM_Task($v13)) | Out-Null<br />
+  }</p>
+<p>  if ($vmVersion -eq $v8)<br />
+  {<br />
+    Write-Host "Version 8 detected" -ForegroundColor Red</p>
+<p>    # Update Hardware<br />
+    Write-Host "Upgrading Hardware on" $vm -ForegroundColor Yellow<br />
+    Get-View ($vmView.UpgradeVM_Task($v13)) | Out-Null<br />
+  }</p>
+<p>  if ($vmVersion -eq $v9)<br />
+  {<br />
+    Write-Host "Version 9 detected" -ForegroundColor Red</p>
+<p>    # Update Hardware<br />
+    Write-Host "Upgrading Hardware on" $vm -ForegroundColor Yellow<br />
+    Get-View ($vmView.UpgradeVM_Task($v13)) | Out-Null<br />
+  }</p>
+<p>  if ($vmVersion -eq $v10)<br />
+  {<br />
+    Write-Host "Version 10 detected" -ForegroundColor Red</p>
+<p>    # Update Hardware<br />
+    Write-Host "Upgrading Hardware on" $vm -ForegroundColor Yellow<br />
+    Get-View ($vmView.UpgradeVM_Task($v13)) | Out-Null<br />
+  }</p>
+<p>  if ($vmVersion -eq $v11)<br />
+  {<br />
+    Write-Host "Version 10 detected" -ForegroundColor Red</p>
+<p>    # Update Hardware<br />
+    Write-Host "Upgrading Hardware on" $vm -ForegroundColor Yellow<br />
+    Get-View ($vmView.UpgradeVM_Task($v13)) | Out-Null<br />
+  }<br />
+}</p>
+<p>Function CreateHWList($vms, $csvfile)<br />
+{<br />
+  # The setup for this hwlist comes from http://www.warmetal.nl/powerclicsvvminfo<br />
+  Write-Host "Creating a CSV File with VM info" -ForegroundColor Yellow</p>
+<p>  $MyCol = @()<br />
+  ForEach ($item in $vms)<br />
+  {<br />
+    $vm = $item.Name<br />
+    # Variable getvm is required, for some reason the $vm cannot be used to query the host and the IP-address<br />
+    $getvm = Get-VM $VM<br />
+    $vmview = Get-VM $VM | Get-View</p>
+<p>    # VM has to be turned on to make sure all information can be recorded<br />
+    $powerstate = $getvm.PowerState<br />
+    if ($powerstate -ne "PoweredOn")<br />
+    {<br />
+      PowerOn-VM $vm<br />
+    }</p>
+<p>    $vmnic = Get-NetworkAdapter -VM $VM<br />
+    $nicmac = Get-NetworkAdapter -VM $VM | ForEach-Object {$_.MacAddress}<br />
+    $nictype = Get-NetworkAdapter -VM $VM | ForEach-Object {$_.Type}<br />
+    $nicname = Get-NetworkAdapter -VM $VM | ForEach-Object {$_.NetworkName}<br />
+    $VMInfo = "" | Select VMName,NICCount,IPAddress,MacAddress,NICType,NetworkName,GuestRunningOS,PowerState,ToolsVersion,ToolsStatus,ToolsRunningStatus,HWLevel,VMHost<br />
+    $VMInfo.VMName = $vmview.Name<br />
+    $VMInfo.NICCount = $vmview.Guest.Net.Count<br />
+    $VMInfo.IPAddress = [String]$getvm.Guest.IPAddress<br />
+    $VMInfo.MacAddress = [String]$nicmac<br />
+    $VMInfo.NICType = [String]$nictype<br />
+    $VMInfo.NetworkName = [String]$nicname<br />
+    $VMInfo.GuestRunningOS = $vmview.Guest.GuestFullname<br />
+    $VMInfo.PowerState = $getvm.PowerState<br />
+    $VMInfo.ToolsVersion = $vmview.Guest.ToolsVersion<br />
+    $VMInfo.ToolsStatus = $vmview.Guest.ToolsStatus<br />
+    $VMInfo.ToolsRunningStatus = $vmview.Guest.ToolsRunningStatus<br />
+    $VMInfo.HWLevel = $vmview.Config.Version<br />
+    $VMInfo.VMHost = $getvm.VMHost<br />
+    $myCol += $VMInfo<br />
+  }</p>
+<p>  if ((Test-Path -path $csvfile) -ne $True)<br />
+  {<br />
+    $myCol |Export-csv -NoTypeInformation $csvfile<br />
+  }<br />
+  else<br />
+  {<br />
+    $myCol |Export-csv -NoTypeInformation $csvfile-after.csv<br />
+  }<br />
+}</p>
+<p>Function CheckAndUpgradeTools($vm)<br />
+{<br />
+  $vmview = Get-VM $VM | Get-View<br />
+  $family = $vmview.Guest.GuestFamily<br />
+  $vmToolsStatus = Check-ToolsStatus $vm</p>
+<p>  if($vmToolsStatus -eq "OK")<br />
+  {<br />
+    Write-Host "The VM tools are $vmToolsStatus on $vm"<br />
+  }<br />
+  elseif(($family -eq "windowsGuest") -and ($vmToolsStatus -ne "NotInstalled"))<br />
+  {<br />
+    Write-Host "The VM tools are $vmToolsStatus on $vm. Starting update/install now! This will take at few minutes." -ForegroundColor Red<br />
+    Get-Date<br />
+    Get-VMGuest $vm | Update-Tools -NoReboot<br />
+    do<br />
+    {<br />
+      sleep 10<br />
+      Write-Host "Checking ToolsStatus $vm now"<br />
+      $vmToolsStatus = Check-ToolsStatus $vm<br />
+    }until($vmToolsStatus -eq "OK")<br />
+    PowerOff-VM $vm<br />
+    PowerOn-VM $vm<br />
+  }<br />
+  else<br />
+  {<br />
+    LogWrite "Linux / Windows (no tools installed) detected: $vm" "WARNING" "1"<br />
+    # ToDo: If the guest is running windows but tools notrunning/notinstalled it might be an option to invoke the installation through powershell.<br />
+    # Options are then Invoke-VMScript cmdlet or through windows installer: msiexec-i "D: \ VMware Tools64.msi" ADDLOCAL = ALL REMOVE = Audio, Hgfs, VMXNet, WYSE, GuestSDK, VICFSDK, VAssertSDK / qn<br />
+    # We're skipping all non-windows guest since automated installs are not supported<br />
+    # Write-Host "$vm is a $family with tools status $vmToolsStatus. Therefore we're skipping this VM" -ForegroundColor Red</p>
+<p>    Write-Host "$vm is a $family with tools status $vmToolsStatus. We are going to do the upgrade, but we'll take a snapshot beforehand"<br />
+    if ($vmToolsStatus -ne "NotInstalled")<br />
+    {<br />
+      Make-Snapshot $vm<br />
+      Get-Date<br />
+      Get-VMGuest $vm | Update-Tools -NoReboot<br />
+      do<br />
+      {<br />
+        sleep 10<br />
+        Write-Host "Checking ToolsStatus $vm now"<br />
+        $vmToolsStatus = Check-ToolsStatus $vm<br />
+      }until($vmToolsStatus -eq "OK")<br />
+      PowerOff-VM $vm<br />
+      PowerOn-VM $vm</p>
+<p>    }</p>
+<p>  }<br />
+}</p>
+<p>Function CheckAndUpgrade($vm)<br />
+{<br />
+  $vmHardware = Check-VMHardwareVersion $vm<br />
+  $vmToolsStatus = Check-ToolsStatus $vm</p>
+<p>  if($vmHardware -eq "OK")<br />
+  {<br />
+      Write-Host "The hardware level is $vmHardware on $vm"<br />
+  }<br />
+  elseif($vmToolsStatus -eq "OK")<br />
+  {<br />
+      Write-Host "The hardware level is $vmHardware on $vm." -ForegroundColor Red<br />
+      $PowerOffVM = PowerOff-VM $vm<br />
+      if($PowerOffVM -eq "OK")<br />
+      {<br />
+          Write-Host "Starting upgrade hardware level on $vm."<br />
+          Upgrade-VMHardware $vm<br />
+          sleep 5<br />
+          PowerOn-VM $vm<br />
+          Write-Host $vm "is up to date" -ForegroundColor Green<br />
+      }<br />
+      else<br />
+      {<br />
+          Write-Host "There is something wrong with the hardware level or the tools of $vm. Skipping $vm."<br />
+      }<br />
+  }<br />
+}</p>
+<p>Connect-VIServer -Server $vcenter -Credential $vcCred -WarningAction SilentlyContinue | out-null<br />
+Write-Host "connecting to $vcenter"</p>
+<p>$vms = VM-Selection<br />
+CreateHWList $vms $csvfile<br />
+foreach($item in $vms)<br />
+{<br />
+    $vm = $item.Name<br />
+    Write-Host "Test $vm"<br />
+    CheckAndUpgradeTools $vm<br />
+    CheckAndUpgrade $vm<br />
+}<br />
+CreateHWList $vms $csvfile<br />
+# $toggle = Read-Host "Would you like me to remove the snapshots taken on Linux VMs? (yes/no)"<br />
+# if ($toggle -eq "yes")<br />
+# {<br />
+#   Get-VM | Delete-Snap<br />
+# }<br />
+Disconnect-VIServer -Confirm:$false<br />
+[/code]</p>
+<h2>Requirements</h2>
+<p>You'll need PowerCLI (obviously) and the nice thing about this script: it gives you the choice on how to specify which VMs to do the upgrades on.</p>
+<ul>
+<li>Specify a textfile with the displaynames of the vms line by line</li>
+<li>Specify a folder/resource pool in which the VMs reside in</li>
+<li>Specify a VM Name</li>
+<li>just do all of the vms</li>
+</ul>
+<p>&nbsp;</p>
+<p>https://youtu.be/lq1vJ20_QLI</p>
+<p>If you have any questions. Don't hesitate to hit me up on twitter or add a comment here.</p>

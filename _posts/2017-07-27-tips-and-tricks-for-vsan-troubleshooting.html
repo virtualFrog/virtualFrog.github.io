@@ -1,0 +1,138 @@
+---
+layout: post
+title: Tips and Tricks for vSAN troubleshooting
+date: 2017-07-27 14:07:28.000000000 +02:00
+type: post
+parent_id: '0'
+published: true
+password: ''
+status: publish
+categories:
+- virtualFrog Posts
+- VMware
+- vSAN
+tags:
+- Troubleshooting
+meta:
+  _thumbnail_id: '437'
+  _publicize_done_external: a:1:{s:7:"twitter";a:1:{i:9383931;s:56:"https://twitter.com/virtual_dd/status/890544167646056452";}}
+  _rest_api_published: '1'
+  _rest_api_client_id: "-1"
+  _publicize_job_id: '7546986030'
+  _publicize_done_9340485: '1'
+  _wpas_done_9383931: '1'
+  publicize_twitter_user: virtual_dd
+  publicize_linkedin_url: https://www.linkedin.com/updates?discuss=&scope=391645417&stype=M&topic=6296309860690599936&type=U&a=aU02
+  _publicize_done_14862392: '1'
+  _wpas_done_14749148: '1'
+author:
+  login: virtualfrog
+  email: dario.doerflinger@gmail.com
+  display_name: virtualFrog
+  first_name: ''
+  last_name: ''
+permalink: "/2017/07/27/tips-and-tricks-for-vsan-troubleshooting/"
+---
+<p>Today I attended a Web-Session from VMware with the topic vSAN troubleshooting tips and tricks and I wanted to share those tips and tricks with you.</p>
+<h2>Common sense</h2>
+<p>Ensure that your hardware is on the VMware HCL<br />
+- Disks / Controllers / Firmare / Drivers</p>
+<p>Ensure that you have up-to-date backups (and test the restore process fully)</p>
+<p><!--more--></p>
+<h2>vSAN Overview</h2>
+<p>Cluster: 2-64 physical hosts<br />
+Host: 1-5 disk groups<br />
+Disk Group: 1 flash for cache, 1-7 flash or HDD devices for capacity</p>
+<p>vSAN Objects:<br />
+- VM Home, VM Swap, VMDK, Delta Disk, Memory Delta</p>
+<p>Storage Policies:<br />
+- Applied at per VM level or VMDK level<br />
+- Define protection level &amp; performance</p>
+<p>Each object is made up of one or more components (depending on your storage policy)</p>
+<p>[caption id="attachment_464" align="alignnone" width="600"]<img class="alignnone size-full wp-image-464" src="{{ site.baseurl }}/assets/images/screen-shot-2017-07-27-at-13-12-56.png" alt="Screen Shot 2017-07-27 at 13.12.56" width="600" height="454" /> C1 &amp; C2 = Components, W = Witness[/caption]</p>
+<p>Component states:</p>
+<ul>
+<li>Active - component accessible</li>
+<li>Absent - Inaccessible, but no explicit error codes sensed
+<ul>
+<li>host outage or maint mode with "ensure accessibility"</li>
+<li>rebuild begins after 60 minute timeout</li>
+</ul>
+</li>
+<li>Degraded - Inaccessible with error codes sensed
+<ul>
+<li>device failure</li>
+<li>rebuild begins immediately</li>
+</ul>
+</li>
+<li>Active - stale
+<ul>
+<li>In queue of objects to rebuild</li>
+</ul>
+</li>
+</ul>
+<p>&nbsp;</p>
+<h2>vSAN Tools</h2>
+<ul>
+<li>vRealize Ops / Log Insight</li>
+<li>ESXCLI</li>
+<li>RVC</li>
+<li>Health Check</li>
+<li><a href="https://kb.vmware.com/kb/2064240" target="_blank" rel="noopener">vSAN Observer</a> (for performance issues)</li>
+</ul>
+<h3>ESXCLI</h3>
+<p><strong>esxcli vsan</strong> - gives the available namespaces<br />
+<em>New in 6.6: debug &amp; health</em></p>
+<p><strong>esxcli vsan helath cluster list</strong> - Gives you an overview with the traffic light system (green, yellow, red) where you see all tests<br />
+<strong>esxcli vsan health cluster get -t "vSAN Disk Balance"</strong>  - get results of a test from above command<br />
+<strong>esxcli vsan health cluster get -t "vSAN object health"</strong> - vSAN object health could mean serious problems if status is red. (Get UUID of object to track the problem with those objects)</p>
+<p><strong>esxcli vsan debug</strong> - gives available namespaces<br />
+<strong>esxcli vsan debug resync summary</strong> - give information of current resync process<br />
+<strong>esxcli vsan debug object health summary get</strong> - gives you an overview of your health<br />
+<strong>esxcli vsan debug object list |more</strong> - Gives back all objects back including component states<br />
+<strong>esxcli vsan debug disk list</strong> - gives you information about your disk and if they can keep up<br />
+<strong>esxcli vsan debug controller list</strong> - gives information about your disk controllers (HCL information, Queue depth)</p>
+<p>&nbsp;</p>
+<h3>RVC (Ruby vSphere Console)</h3>
+<p>The RVC is preinstalled on all vCenter Server variants.</p>
+<p>vsan.check_state 0<br />
+<img class="alignnone size-full wp-image-501" src="{{ site.baseurl }}/assets/images/screen-shot-2017-07-27-at-13-28-44.png" alt="Screen Shot 2017-07-27 at 13.28.44" width="1098" height="260" /></p>
+<p>vsan.disks_stats 0<br />
+<img class="alignnone size-full wp-image-503" src="{{ site.baseurl }}/assets/images/screen-shot-2017-07-27-at-13-29-08.png" alt="Screen Shot 2017-07-27 at 13.29.08.png" width="1260" height="404" /></p>
+<p>vsan.cluster_info 0<br />
+<img class="alignnone size-full wp-image-506" src="{{ site.baseurl }}/assets/images/screen-shot-2017-07-27-at-13-29-53.png" alt="Screen Shot 2017-07-27 at 13.29.53" width="1214" height="458" /></p>
+<h3>Health UI</h3>
+<p><img class="alignnone size-full wp-image-508" src="{{ site.baseurl }}/assets/images/screen-shot-2017-07-27-at-13-30-33.png" alt="Screen Shot 2017-07-27 at 13.30.33" width="1050" height="486" /></p>
+<p>vSAN Disk balance<br />
+<img class="alignnone size-full wp-image-511" src="{{ site.baseurl }}/assets/images/screen-shot-2017-07-27-at-13-32-00.png" alt="Screen Shot 2017-07-27 at 13.32.00" width="1200" height="512" /></p>
+<h2>vSAN Health</h2>
+<p><strong>python /usr/lib/vmware-vpx/vsan-health/vsan-vc-health-status.py &gt; /tmp/vsan_status.txt</strong></p>
+<p><img class="alignnone size-full wp-image-517" src="{{ site.baseurl }}/assets/images/screen-shot-2017-07-27-at-13-34-56.png" alt="Screen Shot 2017-07-27 at 13.34.56" width="1224" height="386" /></p>
+<p>Running this on a individual node:<br />
+Location: /usr/lib/vmware/vsan/bin/vsan-health-status.pyc</p>
+<blockquote><p>python /usr/lib/vmware/vsan/bin/vsan-health-status.pyc</p></blockquote>
+<p><a href="http://kb.vmware.com/kb/2107705" target="_blank" rel="noopener">KB 2107705</a> has more information on that.</p>
+<p>When to use those: Health Service on vCenter not available</p>
+<h2>Use Cases</h2>
+<p>Cluster with 6 hosts. Three nodes were added. No capacity added after adding the hosts.</p>
+<blockquote><p>esxcli vsan storage list</p></blockquote>
+<p><img class="alignnone size-full wp-image-541" src="{{ site.baseurl }}/assets/images/screen-shot-2017-07-27-at-13-40-13.png" alt="Screen Shot 2017-07-27 at 13.40.13" width="1282" height="602" /><strong>In CMMDS: false - take note of the naa... ID</strong></p>
+<ul>
+<li>Check vobd.log (search for naa... ID)</li>
+<li>Check boot.gz (use zcat; search for naa... ID)
+<ul>
+<li>Disk naa... ID detected to be a snapshot</li>
+</ul>
+</li>
+</ul>
+<p>Resolution:<br />
+- Disk cannot be added because it already has a filesystem on it<br />
+- Disk was given UUID, it was in a cluster and used at some point<br />
+- Verified to delete data<br />
+- Used partedutil to kill partitions<br />
+- Delete disk groups and recreate disk groups</p>
+<p>&nbsp;</p>
+<h3>Useful Logs:</h3>
+<blockquote><p>vobd.log</p></blockquote>
+<p>Search for "problem" and "permanent"</p>
+<p>&nbsp;</p>

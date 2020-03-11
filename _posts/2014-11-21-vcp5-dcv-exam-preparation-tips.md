@@ -1,0 +1,40 @@
+---
+layout: post
+title: 'VCP5 - DCV: Exam Preparation Tips'
+date: 2014-11-21 14:41:18.000000000 +01:00
+type: post
+parent_id: '0'
+published: true
+password: ''
+status: publish
+categories:
+- VMware
+tags: []
+meta:
+  _rest_api_published: '1'
+  _rest_api_client_id: "-1"
+  _wpas_skip_facebook: '1'
+  _wpas_skip_google_plus: '1'
+  _wpas_skip_linkedin: '1'
+  _wpas_skip_tumblr: '1'
+  _wpas_skip_path: '1'
+  publicize_twitter_user: virtual_dd
+  publicize_twitter_url: http://t.co/JgwAvqM0PC
+  _wpas_done_9383931: '1'
+  _publicize_done_external: a:1:{s:7:"twitter";a:1:{i:350746208;b:1;}}
+  _thumbnail_id: '20'
+  _edit_last: '75727371'
+  geo_public: '0'
+  _wpas_skip_9383931: '1'
+author:
+  login: virtualfrog
+  email: dario.doerflinger@gmail.com
+  display_name: virtualFrog
+  first_name: ''
+  last_name: ''
+permalink: "/2014/11/21/vcp5-dcv-exam-preparation-tips/"
+---
+I took the VCP5-DCV for the version 5.5 last week and passed with 491 of 500 possible Points. Before taking the test I was looking for a braindump file of the test which was not in the annoying .vce format. After endless searches I found a PDF containing all the questions and answers for the test. I used that to study the questions. The questions about marketing stuff (or stuff like "Which license is minimum for the feature XY?") are especially hard when you're just working with the product but other people handle the administration stuff like buying licenses and stuff.<!--more-->
+
+So, if you're interested in getting your VCP-DCV Certification please use this [Link](https://virtualfrog.files.wordpress.com/2014/11/vmware-actualtests-vcp550-v2014-05-10-by-kristin.pdf "Braindump for VCP550-DCV") to get the PDF document which I used to study.
+

@@ -1,0 +1,335 @@
+---
+layout: post
+title: Automating VCSA Backup & Restore
+date: 2017-07-20 10:22:26.000000000 +02:00
+type: post
+parent_id: '0'
+published: true
+password: ''
+status: publish
+categories:
+- Scripting
+- virtualFrog Posts
+tags:
+- VMware
+meta:
+  _rest_api_published: '1'
+  _rest_api_client_id: "-1"
+  _thumbnail_id: '235'
+  _publicize_job_id: '7283400606'
+  _publicize_done_external: a:1:{s:7:"twitter";a:1:{i:9383931;s:56:"https://twitter.com/virtual_dd/status/887950821257879552";}}
+  _publicize_done_9340485: '1'
+  _wpas_done_9383931: '1'
+  publicize_twitter_user: virtual_dd
+  publicize_linkedin_url: https://www.linkedin.com/updates?discuss=&scope=391645417&stype=M&topic=6293716514415611904&type=U&a=v4Xp
+  _publicize_done_14862392: '1'
+  _wpas_done_14749148: '1'
+author:
+  login: virtualfrog
+  email: dario.doerflinger@gmail.com
+  display_name: virtualFrog
+  first_name: ''
+  last_name: ''
+permalink: "/2017/07/20/automating-vcsa-backup-restore/"
+---
+<p>I've recently stumbled upon a VMware communities thread where someone had trouble backing up the VCSA database. The were using someone else's script, so I thought I'd share the wrapper script I wrote around two python scripts that VMware has published in its <a href="https://kb.vmware.com/kb/2091961" target="_blank" rel="noopener">KB 2091961</a></p>
+<p><!--more--></p>
+<p>Update: this script is now published at <a href="https://github.com/virtualFrog/PowerCLI-Scripts" target="_blank" rel="noopener">GitHub</a>.</p>
+<h2>The script</h2>
+<p>[code language="bash"]<br />
+#!/bin/bash</p>
+<p>#***************************************************************<br />
+# Get Options from the command line<br />
+#***************************************************************<br />
+while getopts "b:r:h" options<br />
+do<br />
+case $options in<br />
+                b ) opt_b=$OPTARG;;<br />
+                r ) opt_r=$OPTARG;;<br />
+                h ) opt_h=1;;<br />
+                \? ) opt_h=1;;<br />
+esac<br />
+done</p>
+<p>###############################################<br />
+# bkp_rst.sh<br />
+#=============================================<br />
+# Name: bkp_rst.sh<br />
+# Datum: 24.07.2017<br />
+# Ziel: Mache ein Backup der vCenter Appliance Datenbank, Restore die Datenbank<br />
+#<br />
+# Autor: Dario aka virtualFrog<br />
+version="1.5"<br />
+#<br />
+# Changelog:<br />
+# 0.1                   dario           Initial-Setup<br />
+# 1.0                   dario           Testing, Testing, Testing<br />
+# 1.1                   dario           Added dynamic filename &amp; cleanUp Function<br />
+# 1.2                   dario           Added local cleanup<br />
+# 1.3                   dario           Changed local cleanup to delete all but most recent 3 files<br />
+# 1.4                   dario           Added checkForErrors function and writeMail function<br />
+# 1.5                   dario           Added CheckForErrors before every exit statement</p>
+<p># Variablen<br />
+# ---------</p>
+<p>#log-Variablen<br />
+log=/var/log/vmware_backup_restore.log</p>
+<p>#Mail variabeln<br />
+recipients="test@gmail.com,test3@gmail.com"</p>
+<p>#NFS-Parameter<br />
+nfsmount="vcsa"<br />
+nfsserver=""<br />
+nfsoptions="nfs4"</p>
+<p># Funktionen<br />
+# ----------</p>
+<p>function print_banner<br />
+{<br />
+        echo "</p>
+<p>___  __ ____   ___________<br />
+\  \/ // ___\ /  ___/\__  \</p>
+<p> \   /\  \___ \___ \  / __ \_<br />
+  \_/  \___  &gt;____  &gt;(____  /<br />
+           \/     \/      \/<br />
+                            "<br />
+echo "v$version"<br />
+}</p>
+<p>function get_parameter<br />
+{<br />
+        echo "GET_PARAMETER"</p>
+<p>        if [ $opt_h ]; then print_help<br />
+        fi</p>
+<p>        #--------------------------------------<br />
+        # Check to see if -b was passed in<br />
+        #--------------------------------------<br />
+        if [ $opt_b ]; then<br />
+                backup_string=$opt_b<br />
+                echo -e "\tBackup: $backup_string"<br />
+                echo "Backup: $backup_string" &gt;&gt; $log<br />
+                echo ""<br />
+                validate_backup_path<br />
+                filename=`hostname`-`date +%Y-%d-%m:%H:%M:%S`.bak<br />
+                todo="backup"<br />
+                echo ""<br />
+        elif [ $opt_r ]; then<br />
+                restore_string=$opt_r<br />
+                echo -e "\tRestore: $restore_string"<br />
+                echo "Restore: $restore_string" &gt;&gt; $log<br />
+                echo ""<br />
+                validate_restore_path<br />
+                todo="restore"<br />
+                echo ""<br />
+        else<br />
+                echo "warning: no parameters supplied." &gt;&gt; $log<br />
+                echo -e "\tKeine Parameter gefunden."<br />
+                print_help<br />
+        fi</p>
+<p>}</p>
+<p>function print_help<br />
+{<br />
+        echo "Gueltige Parameter: -b  -r "<br />
+        echo ""<br />
+        echo "To restore you should mount the volume ($nfsmount) on ($nfsserver) which this script copies the backups to"<br />
+        exit 0<br />
+}</p>
+<p>function init_log<br />
+{</p>
+<p>                echo `date` &gt; $log<br />
+                echo "fzag_bkp_rst.sh in der Version $version auf `hostname -f`" &gt;&gt; $log<br />
+                echo "____________________________________________" &gt;&gt; $log</p>
+<p>                #echo "Nun startet das Script in der Version $version"<br />
+                echo ""<br />
+}<br />
+function validate_backup_path<br />
+{<br />
+        echo "VALIDATE BACKUP PATH"<br />
+        echo -e "\tChecking Backup Path: $backup_string"<br />
+        if [ ! -d "$backup_string" ]; then<br />
+                echo -e "\tDirectory did not exist. Creating.."<br />
+                mkdir -p $backup_string<br />
+                echo -e "\tDirectory created."<br />
+        else<br />
+                echo -e "\tDirectory does exist."<br />
+        fi<br />
+        echo ""<br />
+}</p>
+<p>function validate_restore_path<br />
+{<br />
+        echo "VALIDATE RESTORE PATH"<br />
+        echo -e "\tChecking Backup Path: $restore_string"<br />
+        if [ -f $restore_string ];<br />
+        then<br />
+                echo -e "\tFile $restore_string exists."<br />
+                echo "File $restore_string exists." &gt;&gt; $log<br />
+        else<br />
+                echo -e "\tFile $restore_string does not exist. Exiting"<br />
+                echo "error: $restore_string does not exist." &gt;&gt; $log<br />
+                checkForErrors<br />
+                exit 1<br />
+        fi<br />
+        echo ""<br />
+}<br />
+function check_python_scripts<br />
+{<br />
+        echo "CHECK PYTHON SCRIPTS"<br />
+        echo -e "\tChecking if Python Scripts are available"<br />
+        DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &amp;&amp; pwd )"<br />
+        if [ -f "$DIR/backup_lin.py" ]; then<br />
+                echo -e "\tBackup Script found, continue.."<br />
+                echo "script for backup found" &gt;&gt; $log<br />
+                if [ -f "$DIR/restore_lin.py" ]; then<br />
+                        echo -e "\tRestore Script found, continue.."<br />
+                        echo "script for restore found" &gt;&gt; $log<br />
+                else<br />
+                        echo -e "\tNo restore script found, exit"<br />
+                        echo "error: no python restore script found" &gt;&gt; $log<br />
+                        checkForErrors<br />
+                        exit 1<br />
+                fi<br />
+        else<br />
+                echo -e "\tNo backup script found, exit"<br />
+                echo "error: no python backup scripts found" &gt;&gt; $log<br />
+                checkForErrors<br />
+                exit 1<br />
+        fi<br />
+        echo ""<br />
+}</p>
+<p>function create_backup<br />
+{<br />
+        echo "CREATE BACKUP"<br />
+        echo -e "\tCreating the Backup in the file $backup_string/bk.bak:"<br />
+        DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &amp;&amp; pwd )"</p>
+<p>        echo `python $DIR/backup_lin.py -f $backup_string/$filename` &gt;&gt; $log<br />
+        if [ $? -ne 0 ]; then<br />
+                echo -e "\tError: Return code from backup job was not 0"<br />
+                echo "error: return code from backup job was not 0" &gt;&gt; $log<br />
+                checkForErrors<br />
+                exit 1<br />
+        else<br />
+                if [ -f "$backup_string/$filename" ]; then<br />
+                        echo -e "\tSuccess! Backup created."<br />
+                        echo "success: backup created" &gt;&gt; $log<br />
+                fi<br />
+        fi<br />
+        echo ""<br />
+}</p>
+<p>function restore_db<br />
+{<br />
+        echo "RESTORE DB"<br />
+        echo -e "\tRestoring Database with supplied Backup-File: $restore_string"<br />
+        DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &amp;&amp; pwd )"<br />
+        echo `python $DIR/restore_lin.py -f $restore_string` &gt;&gt; $log<br />
+        if [ $? -ne 0 ]; then<br />
+                echo -e "\tError: Return code from restore job was not 0"<br />
+                echo "error: return code from restore job was not 0" &gt;&gt; $log<br />
+        fi<br />
+        echo ""</p>
+<p>}</p>
+<p>function mountNFS<br />
+{<br />
+        echo "MOUNT NFS"<br />
+        echo -e "\tMounting the given NFS Volume ($nfsmount) on server ($nfsserver)"<br />
+        if [[ ! -d /mnt/bkp ]]; then<br />
+                mkdir -p /mnt/bkp<br />
+        fi</p>
+<p>        mount -t $nfsoptions $nfsserver:$nfsmount /mnt/bkp<br />
+        if [[ $? -ne 0 ]]; then<br />
+                echo -e "\tMount was not successful. Abort the operation"<br />
+                echo "mount was not successful" &gt;&gt; $log<br />
+                checkForErrors<br />
+                exit 1<br />
+        fi<br />
+        echo ""<br />
+        return 0<br />
+}</p>
+<p>function copyBackup<br />
+{<br />
+        echo "COPY BACKUP"<br />
+        echo -e "\tCopying Backup to NFS Mount"<br />
+        cp $backup_string/$filename /mnt/bkp/<br />
+        if [[ $? -ne 0 ]]; then<br />
+                echo -e "\tCopy Operation was not successful. Abort the operation"<br />
+                echo "copy was not successful" &gt;&gt; $log<br />
+                checkForErrors<br />
+                exit 1<br />
+        fi<br />
+        echo ""<br />
+}</p>
+<p>function unMountNFS<br />
+{<br />
+        echo "UMOUNT NFS"<br />
+        echo -e "\tUnmounting the NFS Mount"<br />
+        umount /mnt/bkp<br />
+        if [[ $? -ne 0 ]]; then<br />
+                echo -e "\tumount Operation was not successful."<br />
+                echo "umount was not successful" &gt;&gt; $log<br />
+        fi<br />
+        echo ""<br />
+}</p>
+<p>function cleanUp<br />
+{<br />
+        echo "CLEAN UP"<br />
+        echo -e "\tCleaning up Backups older than 4 days and all local files but the 3 most recent"</p>
+<p>        find /mnt/bkp -mtime +4 -exec rm -rf {} \;<br />
+        if [[ $? -ne 0 ]]; then<br />
+                echo -e "\tNFS cleanUp Operation was not successful."<br />
+                echo "NFS cleanUp was not successful" &gt;&gt; $log<br />
+        fi</p>
+<p>        cd $backup_string<br />
+        ls -t1 $backup_string |tail -n +3 | xargs rm<br />
+        if [[ $? -ne 0 ]]; then<br />
+                echo -e "\tLocal cleanUp Operation was not successful."<br />
+                echo "local cleanUp was not successful" &gt;&gt; $log<br />
+        fi<br />
+        echo ""<br />
+}</p>
+<p>function writeEmail<br />
+{<br />
+        echo "WRITE EMAIL"<br />
+        echo -e "\tSending the logfile as a mail to $recipients"<br />
+        subject="VCSA Backup has run into a error"<br />
+        from="root@`hostname -f`"<br />
+        body=`cat $log`</p>
+<p>        /usr/sbin/sendmail "$recipients" &lt;&gt; $log<br />
+        service vmware-vdcs stop &gt;&gt; $log<br />
+        restore_db<br />
+        service-control --start vmware-vpxd &gt;&gt; $log<br />
+        service-control --start vmware-vdcs &gt;&gt; $log<br />
+        unMountNFS<br />
+        checkForErrors<br />
+fi<br />
+[/code]</p>
+<h2>Requirements</h2>
+<p>The script expects the python scripts from the <a href="https://kb.vmware.com/kb/2091961" target="_blank" rel="noopener">KB 2091961</a> to be in the same directory as the scripts. It will stop if they are not there.</p>
+<h2>Usage</h2>
+<p>Even though I went the extra mile to provide a syntax helper (so if you run the script with no parameters it will display which parameters you should use) I will tell you here exactly how to use the script.</p>
+<p>First thing to do is to fill in the variables for the nfs server and mount where you want to store your backup:</p>
+<p>[code language="bash"]<br />
+#NFS-Parameter<br />
+nfsmount="vcsa"<br />
+nfsserver="192.168.1.1"<br />
+nfsoptions="nfs4"<br />
+[/code]</p>
+<h3>Backup</h3>
+<p>[code language="bash"]<br />
+./bkp_rst_1.2.sh -b /tmp/backup<br />
+[/code]</p>
+<p>This will create the directory if it doesn't exist and will keep some backups local. There is a cleanup function that deletes stuff older than 4 days.</p>
+<h3>Restore</h3>
+<p>[code language="bash"]<br />
+./bkp_rst_1.2.sh -r /tmp/backup/bk.bak<br />
+[/code]</p>
+<p>In order to restore you need to specify a file to restore from. If it is one on the nfs server running the script without parameters will tell you the nfs server and which mount you've defined in the script.</p>
+<h3>Crontab</h3>
+<p>This script is made to run as a cronjob. So just use "crontab -e" (edit mode) and add this line:</p>
+<p>[code language="bash"]<br />
+0 * * * * /bin/bash /usr/bin/bkp_rst_1.2.sh -b /tmp/backup<br />
+[/code]</p>
+<p><strong>Attention for vSphere 6.5:</strong><br />
+There is a bug in VCSA 6.5 GA which prevents cron to run scripts.<br />
+You'll need to change the file "/etc/pam.d/crond". Change the 3 references to "password-auth" to "system-auth" and it will work. <del>I hope this will get fixed in Update 1.</del></p>
+<p>Update: It has not been fixed in vSphere 6.5 Update 1 GA, we might see a fix coming within a patch.</p>
+<p>If you need help with this reach out to me on twitter or hit me up with a comment.</p>
+<p>Here is a sample output of the script when it is run manually:<br />
+<img class="alignnone size-full wp-image-235" src="{{ site.baseurl }}/assets/images/screen-shot-2017-07-20-at-10-18-06.png" alt="Screen Shot 2017-07-20 at 10.18.06" width="640" height="639" /></p>
+<p>And here is the output if run without parameters:<br />
+<img class="alignnone size-full wp-image-234" src="{{ site.baseurl }}/assets/images/screen-shot-2017-07-20-at-10-18-24.png" alt="Screen Shot 2017-07-20 at 10.18.24" width="894" height="267" /></p>
+<h2>Update</h2>
+<p>I've just updated the script to version 1.5. It now includes a better local cleanup (keeps only the 3 most recent files) has a errorchecking and will write a e-mail if there was a error in the log.</p>

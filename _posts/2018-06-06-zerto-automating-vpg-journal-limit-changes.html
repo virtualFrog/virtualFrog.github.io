@@ -1,0 +1,130 @@
+---
+layout: post
+title: 'Zerto: Automating VPG journal limit changes'
+date: 2018-06-06 11:20:54.000000000 +02:00
+type: post
+parent_id: '0'
+published: true
+password: ''
+status: publish
+categories:
+- virtualFrog Posts
+- Zerto
+tags: []
+meta:
+  _thumbnail_id: '412'
+  _rest_api_published: '1'
+  _rest_api_client_id: "-1"
+  _publicize_done_external: a:1:{s:7:"twitter";a:1:{i:9383931;s:57:"https://twitter.com/virtual_dd/status/1004292144893440000";}}
+  _publicize_job_id: '18663862986'
+  timeline_notification: '1528276879'
+  _publicize_done_9340485: '1'
+  _wpas_done_9383931: '1'
+  publicize_twitter_user: virtual_dd
+  publicize_linkedin_url: https://www.linkedin.com/updates?discuss=&scope=391645417&stype=M&topic=6410057837732597760&type=U&a=l9E2
+  _publicize_done_14862392: '1'
+  _wpas_done_14749148: '1'
+author:
+  login: virtualfrog
+  email: dario.doerflinger@gmail.com
+  display_name: virtualFrog
+  first_name: ''
+  last_name: ''
+permalink: "/2018/06/06/zerto-automating-vpg-journal-limit-changes/"
+---
+<p>I helped one of our customers implement Zerto in their environment. When you deploy Zerto and start protecting your VMs with it you need to know which applications you want to group together into virtual protection groups (VPGs). Another thing you'd define beforehand would be how many days you would want to be able to go back in time with Zerto and use that as a base to define the journal size limit of your VPGs.</p>
+<p><!--more--></p>
+<p>Now, some VMs produce a lot of I/Os while other are basically silent. This is key in how much space they are going to use and need in their VPG. So while for most of your VPGs the intially defined limit will be sufficient to reach your desired amount of time to go back it will not nearly be enough for your most I/O intensive workloads.</p>
+<p>When you then go ahead and change the journal limit on this VPG it will NOT update this setting on VMs that are already inside this VPG. When we first noticed this we thought this must be a bug and opened a case with Zerto. The support engineer then told us that this is not a bug but rather it's a feature... The customer and we had a different view on that so we started looking at the zerto API to remedy this unsatisfying situation.</p>
+<p>Long story short: Below is a script that will enable you to change the journal limit on a VPG and then iterate through all VMs in that VPG and set the same values (makes perfect sense in our use-case).</p>
+<p>Update: this script is now published at <a href="https://github.com/virtualFrog/PowerCLI-Scripts" target="_blank" rel="noopener">GitHub</a>.</p>
+<p>[code language="powershell"]</p>
+<p>param(<br />
+[Parameter(Mandatory = $true)][string]$zvm = "zvm.virtualfrog.wordpress.com",<br />
+[Parameter(Mandatory = $true)][string]$vpgName = "Test",<br />
+[Parameter(Mandatory = $true)][Int32]$LimitValueInGB = 300,<br />
+[Parameter(Mandatory = $true)][Int32]$ThresholdValueInGB = 250<br />
+)</p>
+<p>#----------------------------------------------------------[Declarations]----------------------------------------------------------</p>
+<p># Build Base URL -&gt; for all RestMethods<br />
+$baseURL = "https://" + $zvm + ":443/v1/"</p>
+<p># New Limit Value in MB<br />
+$LimitValueInMB = $LimitValueInGB * 1024</p>
+<p># New Warning Threshold in MB<br />
+$ThresholdValueInMB = $ThresholdValueInGB * 1024</p>
+<p># Responsetype<br />
+$TypeJSON = "application/json"</p>
+<p>#-----------------------------------------------------------[Functions]------------------------------------------------------------</p>
+<p>Function Get-ZertoSession ($ZertoUser, $ZertoPassword) {<br />
+# Authenticating with Zerto APIs<br />
+$xZertoSessionURL = $baseURL + "session/add"<br />
+$authInfo = ("{0}:{1}" -f $ZertoUser, $ZertoPassword)<br />
+$authInfo = [System.Text.Encoding]::UTF8.GetBytes($authInfo)<br />
+$authInfo = [System.Convert]::ToBase64String($authInfo)<br />
+$headers = @{Authorization = ("Basic {0}" -f $authInfo)}<br />
+$sessionBody = '{"AuthenticationMethod": "1"}'</p>
+<p># Get Zerto Session Response<br />
+$xZertoSessionResponse = Invoke-WebRequest -Uri $xZertoSessionURL -Headers $headers -Method POST -Body $sessionBody -ContentType $TypeJSON</p>
+<p># Extracting x-zerto-session from the response<br />
+$xZertoSession = $xZertoSessionResponse.headers.get_item("x-zerto-session")</p>
+<p># Return Zerto Session Header<br />
+return @{"Accept" = "application/json"; "x-zerto-session" = $xZertoSession}<br />
+}</p>
+<p>#-----------------------------------------------------------[Execution]------------------------------------------------------------</p>
+<p># Get Zerto Session<br />
+$zertoSessionHeader = Get-ZertoSession -ZertoUser "virtualFrog" -ZertoPassword "Password"</p>
+<p># Get VPG<br />
+$vpgListUrl = $baseURL + "vpgs"<br />
+$vpg = Invoke-RestMethod -Uri $vpgListUrl -Headers $zertoSessionHeader -ContentType $TypeJSON</p>
+<p>#Filter the one from the paramater<br />
+$vpgToEdit = $vpg |Where-Object {$_.VpgName -eq "$vpgName"}<br />
+Write-Host "Changing Journal Limit and Threshold Settings of: "($vpgToEdit.VpgName)</p>
+<p>#Get the identifier of this VPG<br />
+$VPGidentifier = $vpgToEdit.VpgIdentifier<br />
+$VPGidentifierJSON = '{"VpgIdentifier":"' + $VPGidentifier + '"}'<br />
+#$VPGidentifier</p>
+<p># Get VPG Settings Identifier<br />
+$VPGSettingsIDURL = $baseURL + "vpgSettings"<br />
+$VPGSettingsIdentifier = Invoke-RestMethod -Method Post -Uri $VPGSettingsIDURL -Body $VPGidentifierJSON -ContentType $TypeJSON -Headers $zertoSessionHeader</p>
+<p># Set VPG Settings URL<br />
+$VPGSettingsURL = $baseURL + "vpgSettings/" + $VPGSettingsIdentifier<br />
+$VPGSettingsBasicURL = $VPGSettingsURL + "/basic"<br />
+$VPGSettingsJournalURL = $VPGSettingsURL + "/journal"<br />
+$VPGSettingsCommitURL = $VPGSettingsURL + "/commit"<br />
+$VPGSettingsVMsJournalURL = $VPGSettingsURL + "/vms"</p>
+<p># Get the actual VPG Settings<br />
+$VPGSettings = Invoke-RestMethod -Uri $VPGSettingsURL -Headers $zertoSessionHeader -ContentType $TypeJSON</p>
+<p>$HardLimitGB = $VPGSettings.Journal.Limitation.HardLimitInMB / 1024<br />
+$WarningThresholdGB = $VPGSettings.Journal.Limitation.WarningThresholdInMB / 1024<br />
+#Write-Host "Hard Limit of this VPG in GB: " $HardLimitGB<br />
+#Write-Host "Warning Threshold of this VPG in GB: " $WarningThresholdGB</p>
+<p>#Change Setting of VPG<br />
+$VPGSettings.Journal.Limitation.HardLimitInMB = $LimitValueInMB<br />
+$VPGSettings.Journal.Limitation.WarningThresholdInMB = $ThresholdValueInMB</p>
+<p>$data = @{Limitation = @{<br />
+HardLimitInMB = $LimitValueInMB<br />
+WarningThresholdInMB = $ThresholdValueInMB<br />
+}<br />
+}<br />
+$json = $data | ConvertTo-Json</p>
+<p>$vmdata = @{Journal = @{<br />
+Limitation = @{<br />
+HardLimitInMB = $LimitValueInMB<br />
+WarningThresholdInMB = $ThresholdValueInMB<br />
+}<br />
+}<br />
+}<br />
+$vmjson = $vmdata |ConvertTo-Json<br />
+#Write Change to Zerto<br />
+$ChangedVPG = Invoke-RestMethod -Uri $VPGSettingsJournalURL -Method Put -Body $json -Headers $zertoSessionHeader -ContentType $TypeJSON</p>
+<p>foreach ($vm in $VPGSettings.VMs) {<br />
+$vmIdentifier = $vm.VmIdentifier<br />
+$VPGSettingsVMsJournalURL = $VPGSettingsURL + "/vms/" + $vmIdentifier<br />
+$VMHardLimitGB = $vm.Journal.Limitation.HardLimitInMB / 1024<br />
+$VMWarningThreshold = $vm.Journal.Limitation.WarningThresholdInMB / 1024</p>
+<p>#Write-Host "VM ("$vm.VmIdentifier") has Limit of "$VMHardLimitGB " GB and Warning of " $VMWarningThreshold "GB"<br />
+$ChangedVPG = Invoke-RestMethod -Uri $VPGSettingsVMsJournalURL -Method Put -Body $vmjson -Headers $zertoSessionHeader -ContentType $TypeJSON</p>
+<p>}</p>
+<p>$VPGCommit = Invoke-RestMethod -Method Post -Uri $VPGSettingsCommitURL -ContentType $TypeJSON -Headers $zertoSessionHeader<br />
+Write-Host -ForegroundColor Green "Changed the valued successfully!"</p>
+<p>[/code]</p>

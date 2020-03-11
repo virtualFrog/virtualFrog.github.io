@@ -1,0 +1,116 @@
+---
+layout: post
+title: 'PowerCLI: Automating VM Shutdown triggered by USV'
+date: 2017-07-21 10:00:00.000000000 +02:00
+type: post
+parent_id: '0'
+published: true
+password: ''
+status: publish
+categories:
+- virtualFrog Posts
+tags: []
+meta:
+  _rest_api_published: '1'
+  _rest_api_client_id: "-1"
+  _thumbnail_id: '29'
+  _publicize_done_9340485: '1'
+  _wpas_done_9383931: '1'
+  _publicize_job_id: '7321226599'
+  _publicize_done_external: a:1:{s:7:"twitter";a:1:{i:9383931;s:56:"https://twitter.com/virtual_dd/status/888311971719852032";}}
+  publicize_twitter_user: virtual_dd
+  publicize_linkedin_url: https://www.linkedin.com/updates?discuss=&scope=391645417&stype=M&topic=6294077662973435904&type=U&a=QaoA
+  _publicize_done_14862392: '1'
+  _wpas_done_14749148: '1'
+author:
+  login: virtualfrog
+  email: dario.doerflinger@gmail.com
+  display_name: virtualFrog
+  first_name: ''
+  last_name: ''
+permalink: "/2017/07/21/powercli-automating-vm-shutdown-triggered-by-usv/"
+---
+<p>So another customer had a requirement. They want their USV to trigger a script that moves all VMs from one datacenter to the other datacenter in case of a power failure.</p>
+<p>I started to write the following script, but it has not been finalized because some of the customer's engineers are on holidays. I will update this post as soon as the final script is ready.</p>
+<p>One thing to note: It uses the same VI Credential Store as my previous script to automate VM skeleton creation.</p>
+<p><!--more--></p>
+<p>Update: this script is now published at <a href="https://github.com/virtualFrog/PowerCLI-Scripts" target="_blank" rel="noopener">GitHub</a>.</p>
+<p>[code language="powershell"]</p>
+<p>############################################################################################<br />
+# Script name:     EvacuateVMsFromUSV.ps1<br />
+# Description:     Evacuate all VMs from one site in a active-active cluster and shut down the Hosts<br />
+# Version:         1.0<br />
+# Date:            20.07.2017<br />
+# Author:          Bechtle Steffen Schweiz AG | Dario Doerflinger (virtualfrog.wordpress.com)<br />
+# History:         20.07.2017 - First tested release<br />
+############################################################################################</p>
+<p># Example: # e.g.: .\EvacuateVMsFromUSV.ps1 -SiteToShutdown Allschwil</p>
+<p>param (<br />
+    [string]$SiteToShutdown # Identifier of site<br />
+)<br />
+$vCenter_server = "bezhvcs03.bechtlezh.ch"<br />
+# clear global ERROR variable<br />
+$Error.Clear()</p>
+<p># import vmware related modules, get the credentials and connect to the vCenter server<br />
+Import-Module -Name VMware.VimAutomation.Core -ErrorAction SilentlyContinue | Out-Null<br />
+Import-Module -Name VMware.VimAutomation.Vds -ErrorAction SilentlyContinue |Out-Null<br />
+$creds = Get-VICredentialStoreItem -file  "C:\Users\Administrator\Desktop\login.creds"<br />
+Connect-VIServer -Server $vCenter_server -User $creds.User -Password $creds.Password |Out-Null</p>
+<p># define global variables</p>
+<p>$current_date = $(Get-Date -format "dd.MM.yyyy HH:mm:ss")<br />
+$log_file = "C:\Users\Administrator\Desktop\\log_$(Get-Date -format "yyyyMMdd").txt"</p>
+<p>Function SetDRStoAutomatic ($cluster)<br />
+{<br />
+    try {<br />
+        $cluster | Set-Cluster -DrsEnabled:$true -DrsAutomationLevel FullyAutomated -Confirm:$false |Out-Null<br />
+    } catch {<br />
+        Write-Host -Foregroundcolor:red "Could not set DRS Mode to automatic"<br />
+    }<br />
+}</p>
+<p>Function RemoveRemovableMediaFromVMs($esxhost)<br />
+{<br />
+    try {<br />
+        $esxhost | Get-VM | Where-Object {$_.PowerState –eq “PoweredOn”} | Get-CDDrive | Set-CDDrive -NoMedia -Confirm:$False |Out-Null</p>
+<p>    } catch {<br />
+        Write-Host -Foregroundcolor:red "Could not get the vm objects from host."<br />
+    }<br />
+}</p>
+<p>Function EvacuateVMsFromHost($esxhost)<br />
+{<br />
+    try {<br />
+        $esxhost | Set-VMHost -State Maintenance -Evacuate:$true -Confirm:$false |Out-Null<br />
+    } catch {<br />
+        Write-Host -Foregroundcolor:red "Could not put host into maintenance mode"<br />
+    }<br />
+}</p>
+<p>Function ShutDownHost($esxhost)<br />
+{<br />
+    try {<br />
+       $esxhost | Stop-VMhost -Confirm:$false -Whatif<br />
+    } catch {<br />
+        Write-Host -Foregroundcolor:red "Could not shut down host"<br />
+    }<br />
+}</p>
+<p>###### Main Program ######<br />
+if ($SiteToShutdown -eq "Allschwil") {<br />
+    $hosts = @("bezhesx40.bechtlezh.ch")</p>
+<p>} elseif ($SiteToShutdown -eq "Pratteln")<br />
+{<br />
+    $hosts = @("bezhesx41.bechtlezh.ch")<br />
+}</p>
+<p>foreach ($esxhost in $hosts)<br />
+{<br />
+    $cluster = (get-vmhost $esxhost).Parent<br />
+    SetDRStoAutomatic($cluster)</p>
+<p>    $esxihost = Get-VMhost $esxhost<br />
+    RemoveRemovableMediaFromVMs($esxihost)<br />
+    EvacuateVMsFromHost($esxihost)<br />
+    ShutDownHost($esxihost)<br />
+}</p>
+<p># cleanup and removal of loaded VMware modules<br />
+Disconnect-VIServer -Server $vCenter_server -Confirm:$false |Out-Null<br />
+Remove-Module -Name VMware.VimAutomation.Vds -ErrorAction SilentlyContinue | Out-Null<br />
+Remove-Module -Name VMware.VimAutomation.Core -ErrorAction SilentlyContinue | Out-Null</p>
+<p># write all error messages to the log file<br />
+Add-Content -Path $log_file -Value $Error</p>
+<p>[/code]</p>

@@ -1,0 +1,489 @@
+---
+layout: post
+title: 'PowerCLI: Testing your networks'
+date: 2017-07-26 15:00:30.000000000 +02:00
+type: post
+parent_id: '0'
+published: true
+password: ''
+status: publish
+categories:
+- Scripting
+- virtualFrog Posts
+- VMware
+tags:
+- PowerCLI
+meta:
+  _thumbnail_id: '29'
+  _publicize_done_external: a:1:{s:7:"twitter";a:1:{i:9383931;s:56:"https://twitter.com/virtual_dd/status/890195128111026177";}}
+  _rest_api_published: '1'
+  _rest_api_client_id: "-1"
+  _publicize_job_id: '7508058440'
+  _publicize_done_9340485: '1'
+  _wpas_done_9383931: '1'
+  publicize_twitter_user: virtual_dd
+  publicize_linkedin_url: https://www.linkedin.com/updates?discuss=&scope=391645417&stype=M&topic=6295960821390417921&type=U&a=jS0m
+  _publicize_done_14862392: '1'
+  _wpas_done_14749148: '1'
+author:
+  login: virtualfrog
+  email: dario.doerflinger@gmail.com
+  display_name: virtualFrog
+  first_name: ''
+  last_name: ''
+permalink: "/2017/07/26/powercli-testing-your-networks/"
+---
+<p>If you are knee-deep in a troubleshooting session with a customer you want to be able to have some tools ready that do some tests for you. One of the things that in my case has happened quite a lot was that some network were connected but couldn't communicate outside of the host. So in a HPE Blade Enclosure infrastructure this was most likely a forgotten VLAN tag in the server profiles.</p>
+<p>In order to quickly eliminate this problem I have worked on a script that helps you test every network in your environment.</p>
+<p><!--more--></p>
+<p>The original script is from https://virtualdatacave.com and has initially only been focused on testing distributed Switches. Someone in the VMware Code community has asked for this script to be enhanced so it would support standard switches as well. I thought: Challenge accepted.</p>
+<p>Porting the script to be able to test standard switches was quite challenging. Because Standard-switches belong to the host a lot of the script's logic had to be changed to be able to test the networks the same way it works for distributed switches.</p>
+<h2>Requirements</h2>
+<ul>
+<li>Windows VM with UAC disabled running in the environment you want to test</li>
+<li>CSV file with the information about the networks to test</li>
+</ul>
+<h2>CSV: Network map</h2>
+<p>The csv you provide should look something like this:</p>
+<p><img class="alignnone size-full wp-image-345" src="{{ site.baseurl }}/assets/images/screen-shot-2017-07-26-at-10-28-11.png" alt="Screen Shot 2017-07-26 at 10.28.11" width="1040" height="140" /></p>
+<p>Make sure it really is "comma separated" because excel tends to save csv with semicolons instead of commas.</p>
+<p><strong>PortGroup</strong>: The name of the Portgroup to test</p>
+<p><strong>SourceIP</strong>: This is the ip you will assign your test-vm in that portGroup (make sure it's available, no one wants duplicate IPs)</p>
+<p><strong>GatewayIP</strong>: Gateway of the network to test</p>
+<p><strong>SubnetMask</strong>: Subnet mask of the network to test</p>
+<p><strong>TestIP</strong>: which IP should we try to ping while doing a test in that portgroup? You can, of course always use the same ip if all your networks are routed, or like in the example to a subnet internal test</p>
+<p>Update: this script is now published at <a href="https://github.com/virtualFrog/PowerCLI-Scripts" target="_blank" rel="noopener">GitHub</a>.</p>
+<h2>The Script</h2>
+<p>[code language="powershell"]</p>
+<p>param<br />
+(<br />
+	[Parameter(Mandatory=$true)]<br />
+	[string]$clusterName,<br />
+	[Parameter(Mandatory=$true)]<br />
+	[string]$dvsName,<br />
+	[Parameter(Mandatory=$true)]<br />
+	[boolean]$isStandard,<br />
+	[Parameter(Mandatory=$true)]<br />
+	[pscredential]$creds,<br />
+	[Parameter(Mandatory=$true)]<br />
+	[string]$vmName,<br />
+	[Parameter(Mandatory=$true)]<br />
+	[string]$csvFile,<br />
+	[int]$timesToPing = 1,<br />
+	[int]$pingReplyCountThreshold = 1,<br />
+	[Parameter(Mandatory=$true)]<br />
+	[string]$resultFile<br />
+)</p>
+<p>#Setup</p>
+<p># Configure internal variables<br />
+$trustVMInvokeable = $false #this is to speed development only.  Set to false.<br />
+$testResults = @()<br />
+$testPortGroupName = "VirtualFrog"<br />
+$data = import-csv $csvFile<br />
+$cluster = get-cluster $clusterName<br />
+$vm = get-vm $vmName</p>
+<p>if ($isStandard -eq $false) {<br />
+    $dvs = get-vdswitch $dvsName<br />
+    $originalVMPortGroup = ($vm | get-Networkadapter)[0].networkname<br />
+	if ($originalVMPortGroup -eq "") {<br />
+		$originalVMPortGroup = ($vm | get-virtualswitch -name $dvsName |get-virtualportgroup)[0]<br />
+		write-host -Foregroundcolor:red "Adding a fantasy Name to $originalVMPortGroup"<br />
+	}<br />
+} else {<br />
+    $originalVMPortGroup = ($vm | get-Networkadapter)[0].networkname<br />
+    $temporaryVar = ($vm |get-networkadapter)[0].NetworkName<br />
+	if ($originalVMPortGroup -eq "") {<br />
+		$originalVMPortGroup = ($vm |get-vmhost |get-virtualswitch -name $dvsName |get-virtualportgroup -Standard:$true)[0]<br />
+		write-host -Foregroundcolor:red "Adding a fantasy Name to $originalVMPortGroup"<br />
+	}<br />
+}<br />
+#We'll use this later to reset the VM back to its original network location if it's empty for some reason wel'll populate it with the first portgroup</p>
+<p>#Test if Invoke-VMScript works<br />
+if(-not $trustVMInvokeable) {<br />
+	if (-not (Invoke-VMScript -ScriptText "echo test" -VM $vm -GuestCredential $creds).ScriptOutput -eq "test") {<br />
+		write-output "Unable to run scripts on test VM guest OS!"<br />
+		return 1<br />
+	}<br />
+}</p>
+<p>#Define Test Functions<br />
+function TestPing($ip, $count, $mtuTest) {<br />
+	if($mtuTest) {<br />
+		$count = 4 #Less pings for MTU test<br />
+		$pingReplyCountThreshold = 3 #Require 3 responses for success on MTU test.  Note this scope is local to function and will not impact variable for future run.<br />
+		$script = "ping -f -l 8972 -n $count $ip"<br />
+	} else {<br />
+		$script =  "ping -n $count $ip"<br />
+	}</p>
+<p>	write-host "Script to run: $script"<br />
+	$result = Invoke-VMScript -ScriptText $script -VM $vm -GuestCredential $creds</p>
+<p>	#parse the output for the "received packets" number<br />
+	$rxcount = (( $result.ScriptOutput | ? { $_.indexof("Packets") -gt -1 } ).Split(',') | ? { $_.indexof("Received") -gt -1 }).split('=')[1].trim()</p>
+<p>	#if we received enough ping replies, consider this a success<br />
+	$success = ([int]$rxcount -gt $pingReplyCountThreshold) </p>
+<p>	#however there is one condition where this will be a false positive... gateway reachable but destination not responding<br />
+	if ( $result.ScriptOutput | ? { $_.indexof("host unreach") -gt -1 } ) {<br />
+		$success = $false<br />
+		$rxcount = 0;<br />
+	}</p>
+<p>	write-host "Full results of ping test..."<br />
+	write-host $result.ScriptOutput</p>
+<p>	return @($success, $count, $rxcount);<br />
+}</p>
+<p>function SetGuestIP($ip, $subnet, $gw) {<br />
+  $script = @"<br />
+	`$iface = (gwmi win32_networkadapter -filter "netconnectionstatus = 2" | select -First 1).interfaceindex<br />
+	netsh interface ip set address name=`$iface static $ip $subnet $gw<br />
+	netsh interface ipv4 set subinterface `$iface mtu=9000 store=active<br />
+"@<br />
+  write-host "Script to run: " + $script<br />
+  return (Invoke-VMScript -ScriptText $script -VM $vm -GuestCredential $creds)<br />
+}</p>
+<p>#Tests<br />
+# Per Port Group Tests  (Test each port group)</p>
+<p>$vmhost = $vm.vmhost<br />
+if ($isStandard -eq $false)<br />
+{<br />
+	foreach($item in $data) {<br />
+		if($testPortGroup = $dvs | get-vdportgroup -name $item.PortGroup) {<br />
+			($vm | get-Networkadapter)[0] | Set-NetworkAdapter -Portgroup $testPortGroup -confirm:$false<br />
+			if( SetGuestIP $item.SourceIP $item.SubnetMask $item.GatewayIP ) {<br />
+				echo ("Set Guest IP to " + $item.SourceIP)</p>
+<p>				#Run normal ping test<br />
+				$pingTestResult = TestPing $item.TestIP $timesToPing $false<br />
+				#Add to results<br />
+				$thisTest = [ordered]@{"VM" = $vm.name; "TimeStamp" = (Get-Date -f s); "Host" = $vmhost.name;}<br />
+				$thisTest["Host"] = $vmhost.name<br />
+				$thisTest["PortGroupName"] = $testPortGroup.name<br />
+				$thisTest["VlanID"] = $testPortGroup.vlanconfiguration.vlanid<br />
+				$thisTest["SourceIP"] = $item.SourceIP<br />
+				$thisTest["DestinationIP"] = $item.TestIP<br />
+				$thisTest["Result"] = $pingTestResult[0].tostring()<br />
+				$thisTest["TxCount"] = $pingTestResult[1].tostring()<br />
+				$thisTest["RxCount"] = $pingTestResult[2].tostring()<br />
+				$thisTest["JumboFramesTest"] = ""<br />
+				$thisTest["Uplink"] = $thisUplink</p>
+<p>				$testResults += new-object -typename psobject -Property $thisTest</p>
+<p>				#DISABLED JUMBO FRAMES TEST!<br />
+				if($false) {<br />
+					#Run jumbo frames test<br />
+					$pingTestResult = TestPing $item.TestIP $timesToPing $true<br />
+					#Add to results<br />
+					$thisTest = [ordered]@{"VM" = $vm.name; "TimeStamp" = (Get-Date -f s); "Host" = $vmhost.name;}<br />
+					$thisTest["Host"] = $vmhost.name<br />
+					$thisTest["PortGroupName"] = $testPortGroup.name<br />
+					$thisTest["VlanID"] = $testPortGroup.vlanconfiguration.vlanid<br />
+					$thisTest["SourceIP"] = $item.SourceIP<br />
+					$thisTest["DestinationIP"] = $item.TestIP<br />
+					$thisTest["Result"] = $pingTestResult[0].tostring()<br />
+					$thisTest["TxCount"] = $pingTestResult[1].tostring()<br />
+					$thisTest["RxCount"] = $pingTestResult[2].tostring()<br />
+					$thisTest["JumboFramesTest"] = ""<br />
+					$thisTest["Uplink"] = $thisUplink</p>
+<p>					$testResults += new-object -typename psobject -Property $thisTest<br />
+				}	</p>
+<p>			} else {<br />
+				$thisTest = [ordered]@{"VM" = $vm.name; "TimeStamp" = (Get-Date -f s); "Host" = $vmhost.name;}<br />
+				$thisTest["PortGroupName"] = $testPortGroup.name<br />
+				$thisTest["VlanID"] = $testPortGroup.vlanconfiguration.vlanid<br />
+				$thisTest["SourceIP"] = $item.SourceIP<br />
+				$thisTest["DestinationIP"] = $item.GatewayIP<br />
+				$thisTest["Result"] = "false - error setting guest IP"<br />
+				$testResults += new-object -typename psobject -Property $thisTest<br />
+			}<br />
+		} else {<br />
+			$thisTest = [ordered]@{"VM" = $vm.name; "TimeStamp" = (Get-Date -f s); "Host" = $vmhost.name;}<br />
+			$thisTest["PortGroupName"] = $item.PortGroup<br />
+			$thisTest["Result"] = "false - could not find port group"<br />
+			$testResults += new-object -typename psobject -Property $thisTest<br />
+		}<br />
+	}<br />
+}<br />
+else {<br />
+    #This is for a Standard Switch<br />
+	foreach($item in $data) {<br />
+		$dvs = $vm |get-vmhost | get-virtualswitch -name $dvsName<br />
+		if($testPortGroup = $dvs | get-virtualportgroup -name $item.PortGroup) {<br />
+			($vm | get-Networkadapter)[0] | Set-NetworkAdapter -Portgroup $testPortGroup -confirm:$false<br />
+			if( SetGuestIP $item.SourceIP $item.SubnetMask $item.GatewayIP ) {<br />
+				echo ("Set Guest IP to " + $item.SourceIP)</p>
+<p>				#Run normal ping test<br />
+				$pingTestResult = TestPing $item.TestIP $timesToPing $false<br />
+				#Add to results<br />
+				$thisTest = [ordered]@{"VM" = $vm.name; "TimeStamp" = (Get-Date -f s); "Host" = $vmhost.name;}<br />
+				$thisTest["Host"] = $vmhost.name<br />
+				$thisTest["PortGroupName"] = $testPortGroup.name<br />
+				$thisTest["VlanID"] = $testPortGroup.vlanid<br />
+				$thisTest["SourceIP"] = $item.SourceIP<br />
+				$thisTest["DestinationIP"] = $item.TestIP<br />
+				$thisTest["Result"] = $pingTestResult[0].tostring()<br />
+				$thisTest["TxCount"] = $pingTestResult[1].tostring()<br />
+				$thisTest["RxCount"] = $pingTestResult[2].tostring()<br />
+				$thisTest["JumboFramesTest"] = ""<br />
+				$thisTest["Uplink"] = $thisUplink</p>
+<p>				$testResults += new-object -typename psobject -Property $thisTest</p>
+<p>				#DISABLED JUMBO FRAMES TEST!<br />
+				if($false) {<br />
+					#Run jumbo frames test<br />
+					$pingTestResult = TestPing $item.TestIP $timesToPing $true<br />
+					#Add to results<br />
+					$thisTest = [ordered]@{"VM" = $vm.name; "TimeStamp" = (Get-Date -f s); "Host" = $vmhost.name;}<br />
+					$thisTest["Host"] = $vmhost.name<br />
+					$thisTest["PortGroupName"] = $testPortGroup.name<br />
+					$thisTest["VlanID"] = $testPortGroup.vlanid<br />
+					$thisTest["SourceIP"] = $item.SourceIP<br />
+					$thisTest["DestinationIP"] = $item.TestIP<br />
+					$thisTest["Result"] = $pingTestResult[0].tostring()<br />
+					$thisTest["TxCount"] = $pingTestResult[1].tostring()<br />
+					$thisTest["RxCount"] = $pingTestResult[2].tostring()<br />
+					$thisTest["JumboFramesTest"] = ""<br />
+					$thisTest["Uplink"] = $thisUplink</p>
+<p>					$testResults += new-object -typename psobject -Property $thisTest<br />
+				}	</p>
+<p>			} else {<br />
+				$thisTest = [ordered]@{"VM" = $vm.name; "TimeStamp" = (Get-Date -f s); "Host" = $vmhost.name;}<br />
+				$thisTest["PortGroupName"] = $testPortGroup.name<br />
+				$thisTest["VlanID"] = $testPortGroup.vlanid<br />
+				$thisTest["SourceIP"] = $item.SourceIP<br />
+				$thisTest["DestinationIP"] = $item.GatewayIP<br />
+				$thisTest["Result"] = "false - error setting guest IP"<br />
+				$testResults += new-object -typename psobject -Property $thisTest<br />
+			}<br />
+		} else {<br />
+			$thisTest = [ordered]@{"VM" = $vm.name; "TimeStamp" = (Get-Date -f s); "Host" = $vmhost.name;}<br />
+			$thisTest["PortGroupName"] = $item.PortGroup<br />
+			$thisTest["Result"] = "false - could not find port group"<br />
+			$testResults += new-object -typename psobject -Property $thisTest<br />
+		}<br />
+	}<br />
+}</p>
+<p># Per Host Tests (Test Each Link for Each VLAN ID on each host)<br />
+$testPortGroup = $null</p>
+<p>if ($isStandard -eq $false)<br />
+{</p>
+<p>	($testPortGroup = new-vdportgroup $dvs -Name $testPortGroupName -ErrorAction silentlyContinue) -or ($testPortGroup = $dvs | get-vdportgroup -Name $testPortGroupName)<br />
+	($vm | get-Networkadapter)[0] | Set-NetworkAdapter -Portgroup $testPortGroup -confirm:$false</p>
+<p>	$cluster | get-vmhost | ? {$_.ConnectionState -match "connected" } | foreach {<br />
+		$vmhost = $_<br />
+		#Migrate VM to new host<br />
+		if(Move-VM -VM $vm -Destination $vmhost) {</p>
+<p>			foreach($item in $data) {<br />
+				#Configure test port group VLAN ID for this particular VLAN test, or clear VLAN ID if none exists<br />
+				$myVlanId = $null<br />
+				$myVlanId = (get-vdportgroup -name $item.PortGroup).VlanConfiguration.Vlanid<br />
+				if($myVlanId) {<br />
+					$testPortGroup = $testPortGroup | Set-VDVlanConfiguration -Vlanid $myVlanId<br />
+				} else {<br />
+					$testPortGroup = $testPortGroup | Set-VDVlanConfiguration -DisableVlan<br />
+				}</p>
+<p>				if( SetGuestIP $item.SourceIP $item.SubnetMask $item.GatewayIP ) {<br />
+					echo ("Set Guest IP to " + $item.SourceIP)</p>
+<p>					#Run test on each uplink individually<br />
+					$uplinkset = ( ($testPortGroup | Get-VDUplinkTeamingPolicy).ActiveUplinkPort + ($testPortGroup | Get-VDUplinkTeamingPolicy).StandbyUplinkPort ) | sort<br />
+					foreach($thisUplink in $uplinkset) {<br />
+						#Disable all uplinks from the test portgroup<br />
+						$testPortGroup | Get-VDUplinkTeamingPolicy | Set-VDUplinkTeamingPolicy -UnusedUplinkPort $uplinkset<br />
+						#Enable  only this uplink for the test portgroup<br />
+						$testPortGroup | Get-VDUplinkTeamingPolicy | Set-VDUplinkTeamingPolicy -ActiveUplinkPort $thisUplink</p>
+<p>						#Run normal ping test<br />
+						$pingTestResult = TestPing $item.TestIP $timesToPing $false<br />
+						#Add to results<br />
+						$thisTest = [ordered]@{"VM" = $vm.name; "TimeStamp" = (Get-Date -f s); "Host" = $vmhost.name;}<br />
+						$thisTest["Host"] = $vmhost.name<br />
+						$thisTest["PortGroupName"] = $testPortGroup.name<br />
+						$thisTest["VlanID"] = $testPortGroup.vlanconfiguration.vlanid<br />
+						$thisTest["SourceIP"] = $item.SourceIP<br />
+						$thisTest["DestinationIP"] = $item.TestIP<br />
+						$thisTest["Result"] = $pingTestResult[0].tostring()<br />
+						$thisTest["TxCount"] = $pingTestResult[1].tostring()<br />
+						$thisTest["RxCount"] = $pingTestResult[2].tostring()<br />
+						$thisTest["JumboFramesTest"] = ""<br />
+						$thisTest["Uplink"] = $thisUplink</p>
+<p>						$testResults += new-object -typename psobject -Property $thisTest</p>
+<p>						#DISABLED JUMBO FRAMES TEST!<br />
+						if($false) {<br />
+							#Run jumbo frames test<br />
+							$pingTestResult = TestPing $item.TestIP $timesToPing $true<br />
+							#Add to results<br />
+							$thisTest = [ordered]@{"VM" = $vm.name; "TimeStamp" = (Get-Date -f s); "Host" = $vmhost.name;}<br />
+							$thisTest["Host"] = $vmhost.name<br />
+							$thisTest["PortGroupName"] = $testPortGroup.name<br />
+							$thisTest["VlanID"] = $testPortGroup.vlanconfiguration.vlanid<br />
+							$thisTest["SourceIP"] = $item.SourceIP<br />
+							$thisTest["DestinationIP"] = $item.TestIP<br />
+							$thisTest["Result"] = $pingTestResult[0].tostring()<br />
+							$thisTest["TxCount"] = $pingTestResult[1].tostring()<br />
+							$thisTest["RxCount"] = $pingTestResult[2].tostring()<br />
+							$thisTest["JumboFramesTest"] = ""<br />
+							$thisTest["Uplink"] = $thisUplink</p>
+<p>							$testResults += new-object -typename psobject -Property $thisTest<br />
+						}<br />
+					}</p>
+<p>					$testPortGroup | Get-VDUplinkTeamingPolicy | Set-VDUplinkTeamingPolicy -ActiveUplinkPort ($uplinkset | sort)</p>
+<p>				} else {<br />
+					$thisTest = [ordered]@{"VM" = $vm.name; "TimeStamp" = (Get-Date -f s); "Host" = $vmhost.name;}<br />
+					$thisTest["PortGroupName"] = $testPortGroup.name<br />
+					$thisTest["VlanID"] = $testPortGroup.vlanconfiguration.vlanid<br />
+					$thisTest["SourceIP"] = $item.SourceIP<br />
+					$thisTest["DestinationIP"] = $item.GatewayIP<br />
+					$thisTest["Result"] = "false - error setting guest IP"<br />
+					$testResults += new-object -typename psobject -Property $thisTest<br />
+				}<br />
+			}<br />
+		} else {<br />
+			$thisTest = [ordered]@{"VM" = $vm.name; "TimeStamp" = (Get-Date -f s); "Host" = $vmhost.name;}<br />
+			$thisTest["Result"] = "false - unable to vMotion VM to this host"<br />
+			$testResults += new-object -typename psobject -Property $thisTest<br />
+		}<br />
+	}<br />
+}<br />
+else {<br />
+    #This is for a standard Switch<br />
+    $vmhost = $null</p>
+<p>    #adding the testPortGroup on all hosts in the cluster<br />
+    $cluster | get-vmhost | ? {$_.ConnectionState -match "connected" } | sort | foreach {<br />
+		$dvs = get-virtualswitch -Name $dvsName -VMhost $_<br />
+    	$dvs | new-virtualportgroup -Name $testPortGroupName -ErrorAction silentlyContinue<br />
+    }</p>
+<p>    $vmhost = $null<br />
+	$cluster | get-vmhost | ? {$_.ConnectionState -match "connected" } | sort | foreach {<br />
+		$vmhost = $_<br />
+		$dvs = get-virtualswitch -Name $dvsName -VMhost $vmhost<br />
+		$testPortGroup = $dvs |get-virtualportgroup -Name $testPortGroupName -VMhost $vmhost -ErrorAction silentlyContinue</p>
+<p>		#Migrate VM to new host<br />
+		if(Move-VM -VM $vm -Destination $vmhost) {<br />
+				write-host -Foregroundcolor:red "Sleeping 5 seconds..."<br />
+				start-sleep -seconds 5<br />
+				if (($vm | get-Networkadapter)[0] | Set-NetworkAdapter -Portgroup ($dvs |get-virtualportgroup -Name $testPortGroupName -VMhost $vmhost) -confirm:$false -ErrorAction stop)<br />
+				{<br />
+					write-host -Foregroundcolor:green "Adapter Change successful"<br />
+				}else {<br />
+				    write-host -Foregroundcolor:red "Cannot change adapter!"<br />
+				    #$esxihost = $vm |get-vmhost<br />
+				    #$newPortgroup = $esxihost | get-virtualportgroup -Name testPortGroupName -ErrorAction silentlyContinue<br />
+				    #if (($vm | get-Networkadapter)[0] | Set-NetworkAdapter -Portgroup ($newPortgroup) -confirm:$false -ErrorAction stop) {<br />
+				    #    write-host -Foregroundcolor:green "Adapter Change successful (2nd attempt)"<br />
+				    #} else {<br />
+				    #    write-host -Foregroundcolor:red "Cannot change Adapter even on 2nd attempt. Exiting script"<br />
+				    #    exit 1<br />
+				    #}<br />
+				}</p>
+<p>			foreach($item in $data) {<br />
+				#Configure test port group VLAN ID for this particular VLAN test, or clear VLAN ID if none exists<br />
+				$myVlanId = $null<br />
+				$myVlanId = [int32](get-virtualportgroup -VMhost $vmhost -Standard:$true -name $item.PortGroup).Vlanid<br />
+				if($myVlanId) {<br />
+					$testPortGroup = $testPortGroup | Set-VirtualPortGroup -Vlanid $myVlanId<br />
+				} else {<br />
+					$testPortGroup = $testPortGroup | Set-VirtualPortGroup -VlanId 0<br />
+				}</p>
+<p>				if( SetGuestIP $item.SourceIP $item.SubnetMask $item.GatewayIP ) {<br />
+					echo ("Set Guest IP to " + $item.SourceIP)</p>
+<p>					#Run test on each uplink individually<br />
+					$uplinkset = ( ($testPortGroup | Get-NicTeamingPolicy).ActiveNic + ($testPortGroup |Get-NicTeamingPolicy).StandbyNic ) |sort<br />
+					foreach($thisUplink in $uplinkset) {<br />
+						#Disable all uplinks from the test portgroup<br />
+						$testPortGroup | Get-NicTeamingPolicy | Set-NicTeamingPolicy -MakeNicUnused $uplinkset<br />
+						#Enable  only this uplink for the test portgroup<br />
+						$testPortGroup | Get-NicTeamingPolicy | Set-NicTeamingPolicy -MakeNicActive $thisUplink</p>
+<p>						#Run normal ping test<br />
+						$pingTestResult = TestPing $item.TestIP $timesToPing $false<br />
+						#Add to results<br />
+						$thisTest = [ordered]@{"VM" = $vm.name; "TimeStamp" = (Get-Date -f s); "Host" = $vmhost.name;}<br />
+						$thisTest["Host"] = $vmhost.name<br />
+						$thisTest["PortGroupName"] = $testPortGroup.name<br />
+						$thisTest["VlanID"] = $testPortGroup.vlanid<br />
+						$thisTest["SourceIP"] = $item.SourceIP<br />
+						$thisTest["DestinationIP"] = $item.TestIP<br />
+						$thisTest["Result"] = $pingTestResult[0].tostring()<br />
+						$thisTest["TxCount"] = $pingTestResult[1].tostring()<br />
+						$thisTest["RxCount"] = $pingTestResult[2].tostring()<br />
+						$thisTest["JumboFramesTest"] = ""<br />
+						$thisTest["Uplink"] = $thisUplink</p>
+<p>						$testResults += new-object -typename psobject -Property $thisTest</p>
+<p>						#DISABLED JUMBO FRAMES TEST!<br />
+						if($false) {<br />
+							#Run jumbo frames test<br />
+							$pingTestResult = TestPing $item.TestIP $timesToPing $true<br />
+							#Add to results<br />
+							$thisTest = [ordered]@{"VM" = $vm.name; "TimeStamp" = (Get-Date -f s); "Host" = $vmhost.name;}<br />
+							$thisTest["Host"] = $vmhost.name<br />
+							$thisTest["PortGroupName"] = $testPortGroup.name<br />
+							$thisTest["VlanID"] = $testPortGroup.vlanid<br />
+							$thisTest["SourceIP"] = $item.SourceIP<br />
+							$thisTest["DestinationIP"] = $item.TestIP<br />
+							$thisTest["Result"] = $pingTestResult[0].tostring()<br />
+							$thisTest["TxCount"] = $pingTestResult[1].tostring()<br />
+							$thisTest["RxCount"] = $pingTestResult[2].tostring()<br />
+							$thisTest["JumboFramesTest"] = ""<br />
+							$thisTest["Uplink"] = $thisUplink</p>
+<p>							$testResults += new-object -typename psobject -Property $thisTest<br />
+						}<br />
+					}</p>
+<p>					$testPortGroup | Get-NicTeamingPolicy | Set-NicTeamingPolicy -MakeNicActive ($uplinkset | sort)</p>
+<p>				} else {<br />
+					$thisTest = [ordered]@{"VM" = $vm.name; "TimeStamp" = (Get-Date -f s); "Host" = $vmhost.name;}<br />
+					$thisTest["PortGroupName"] = $testPortGroup.name<br />
+					$thisTest["VlanID"] = $testPortGroup.vlanid<br />
+					$thisTest["SourceIP"] = $item.SourceIP<br />
+					$thisTest["DestinationIP"] = $item.GatewayIP<br />
+					$thisTest["Result"] = "false - error setting guest IP"<br />
+					$testResults += new-object -typename psobject -Property $thisTest<br />
+				}<br />
+			}<br />
+		} else {<br />
+			$thisTest = [ordered]@{"VM" = $vm.name; "TimeStamp" = (Get-Date -f s); "Host" = $vmhost.name;}<br />
+			$thisTest["Result"] = "false - unable to vMotion VM to this host"<br />
+			$testResults += new-object -typename psobject -Property $thisTest<br />
+		}<br />
+	}<br />
+}</p>
+<p>#Clean up<br />
+if ($isStandard -eq $false)<br />
+{<br />
+	($vm | get-Networkadapter)[0] | Set-NetworkAdapter -Portgroup (get-vdportgroup $originalVMPortGroup) -confirm:$false<br />
+	Remove-VDPortGroup -VDPortGroup $testPortGroup -confirm:$false</p>
+<p>} else {<br />
+	$tempvm = get-vm $vmName<br />
+	$temphost = $tempvm |get-VMhost<br />
+	$portGroupToRevertTo = $temphost |get-virtualportgroup -name $temporaryVar -Standard:$true<br />
+    ($vm | get-Networkadapter)[0] | Set-NetworkAdapter -Portgroup $portGroupToRevertTo -confirm:$false<br />
+    write-host -Foregroundcolor:green "Waiting 5 seconds for $vm to revert back to $temporaryVar"<br />
+    start-sleep -seconds 5<br />
+    $cluster | get-vmhost | ? {$_.ConnectionState -match "connected" } | foreach {<br />
+		$vmhost = $_<br />
+		$dvs = $vmhost | get-virtualswitch -Name $dvsName<br />
+		$testPortGroup = $dvs | get-virtualportgroup -name $testPortGroupName -Standard:$true -VMhost $vmhost<br />
+		remove-virtualportgroup -virtualportgroup $testPortGroup -confirm:$false<br />
+	}<br />
+}</p>
+<p>#Future Test Ideas<br />
+#Query driver/firmware for each host's network adapters ?</p>
+<p>#Show Results<br />
+$testResults | ft<br />
+$testResults | Export-CSV -notypeinformation $resultFile<br />
+[/code]</p>
+<h2>Usage</h2>
+<p>You can run the script without any parameters if you wish, you will be prompted for each of them.</p>
+<ul>
+<li>clusterName : Name of the cluster in which you want to test your networks</li>
+<li>dvsName : Name of the switch (distributed or standard) you want to test</li>
+<li>isStandard: $true or $false depending on wether your switch is standard ($true) or distributed ($false)</li>
+<li>creds : Prompts for the credentials with which you can run scripts on your test-vm (not vCenter credentials)</li>
+<li>vmName : Name of the windows machine that will be used for testing the networks</li>
+<li>csvFile : path to the map.csv as shown in the requirements</li>
+<li>resultFile : path to where you want the resulting csv to be saved</li>
+</ul>
+<p>If you're like me you will pass all arguments when running the script (except maybe creds):</p>
+<blockquote><p>./virtualFrogNetworkTester.ps1 -clusterName VirtualFrog1 -dvsName vSwitch1 -isStandard:$true -vmName networktestingFrogVM -csvFile c:\temp\map.csv -resultFile c:\temp\virtualFrogRocks.csv</p></blockquote>
+<h2>Result</h2>
+<p>The resulting CSV File will look something like that:</p>
+<p><img class="alignnone size-full wp-image-382" src="{{ site.baseurl }}/assets/images/screen-shot-2017-07-26-at-14-43-48.png" alt="Screen Shot 2017-07-26 at 14.43.48" width="1774" height="522" /></p>
+<p>What does that tell you? Well the script does two tests:</p>
+<ol>
+<li>It assigns the test-vm to each network from your map.csv, assigns the ip and pings the target</li>
+<li>Here it goes through all hosts in the cluster, creates a temporary network, assigns the tags from your testnetworks and then goes through the uplinks (setting both unused, then one active, both unused, the other one active).</li>
+</ol>
+<p>So after you've run this test you can tell if all of your uplinks have connectivity to all the assigned networks and you can be sure that VMs are able to communicate inside those networks.</p>
+<h2>Known Issues</h2>
+<p>This is something I couldn't figure out. If your VM is assigned to a network with a name like: "vlan-7-192.168.100.0" the script will not be able to reassign this network in the cleaning up part. It sees the value as multiple values and will not set the networkadapter to that network. So just a hint: Do not use dots (.) in your network names!</p>
+<p>This probably won't be a problem, but I've only tested this in a vSphere 6.0 U3b Environment with PowerCLI 6.5.1. If you have issues with the script, please let me know over twitter or as a comment.</p>

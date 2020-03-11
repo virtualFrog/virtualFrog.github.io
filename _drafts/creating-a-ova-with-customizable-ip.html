@@ -1,0 +1,39 @@
+---
+layout: post
+title: Creating a OVA with Customizable IP
+date: 
+type: post
+parent_id: '0'
+published: false
+password: ''
+status: draft
+categories:
+- virtualFrog Posts
+tags: []
+meta: {}
+author:
+  login: virtualfrog
+  email: dario.doerflinger@gmail.com
+  display_name: virtualFrog
+  first_name: ''
+  last_name: ''
+permalink: "/"
+---
+<p>I have been working a lot on my ESXi Staging Appliance lately. In version 1.0 you still had to go on the shell and set your ip address manually. I was wondering how VMware does it when they let you define the ip address during the OVA deployment wizard. So I started googling.</p>
+<p>Some information on the side:</p>
+<ul>
+<li>I use ubuntu as the linux for my appliance</li>
+<li>the appliance itself does not need any dns resolving so I don't configure dns servers</li>
+</ul>
+<p>After some google and a lot of reading I stumbled upon this blog post from 2014: http://www.v-front.de/2014/01/building-self-configuring-nested-esxi.html</p>
+<p>This guy is doing the exact same thing as me, but he does it for a nested hypervisor deployment. Close enough, I think.</p>
+<p>So what do you need to do to get your appliance equipped with an IP-address that you define during the OVA deployment wizard?</p>
+<p>Basically the workflow is like this:</p>
+<ol>
+<li>you create your vm and enable vApp options in the settings of the vm</li>
+<li>you create vApp properties for ip address, netmask and gateway</li>
+<li>you define how these settings are being passed through to the vm</li>
+<li>you write a short script which grabs this information and applies them to your vm</li>
+</ol>
+<p>&nbsp;</p>
+<p>But let's dive a little deeper into this..</p>

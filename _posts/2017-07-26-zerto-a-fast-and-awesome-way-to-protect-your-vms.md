@@ -1,0 +1,76 @@
+---
+layout: post
+title: 'Zerto: a fast and awesome way to protect your vms'
+date: 2017-07-26 20:24:19.000000000 +02:00
+type: post
+parent_id: '0'
+published: true
+password: ''
+status: publish
+categories:
+- virtualFrog Posts
+tags:
+- Zerto
+meta:
+  _thumbnail_id: '412'
+  _publicize_done_external: a:1:{s:7:"twitter";a:1:{i:9383931;s:56:"https://twitter.com/virtual_dd/status/890276619897774081";}}
+  _rest_api_published: '1'
+  _rest_api_client_id: "-1"
+  _publicize_job_id: '7517434467'
+  _publicize_done_9340485: '1'
+  _wpas_done_9383931: '1'
+  publicize_twitter_user: virtual_dd
+  publicize_linkedin_url: https://www.linkedin.com/updates?discuss=&scope=391645417&stype=M&topic=6296042313714008064&type=U&a=sTa8
+  _publicize_done_14862392: '1'
+  _wpas_done_14749148: '1'
+author:
+  login: virtualfrog
+  email: dario.doerflinger@gmail.com
+  display_name: virtualFrog
+  first_name: ''
+  last_name: ''
+permalink: "/2017/07/26/zerto-a-fast-and-awesome-way-to-protect-your-vms/"
+---
+First off: This article is not sponsored by zerto in any way. I got to know zerto in-depth during a PoC we did for one of our customers and I fell in love with it. It's so incredibly easy to use and has so many nice features. But let's take it step-by-step.
+
+<!--more-->
+
+## What is Zerto?
+
+Zerto is something of a pun because it's a wordplay for "zero RTO", it reality Zerto helps to keep RPO at a minimum but "Zerpo" wouldn't sound as nice, right?
+
+Anways. Zerto is a resilience solution for your virtual datacenter. It is array- and hypervisor agnostic which means you can replicate VMs running on top of vSphere in a vSAN cluster to a Hyper-V cluster running on let's say EMC storage. It is incredible powerful in the way it handles the replication.
+
+A little sidenote that someone told me once: The guys who invented Zerto (aka. founded the company) did something similiar before. They created a software that would replicate VMs over the network and it worked pretty good. Not perfect, but good. You know how you get to a point where when you look back the way you came you see some wrong decisions you've made and at that point it would be too much of an effort to correct those choices? Well this happened with that software. It worked, but scaling was somewhat of a problem. Anyways the first company was sold to a big firm which put a new label on it and still sells it today. The firm's primary business is hardware, so they sell this software on the side and don't really put that much effort into it. So the guys who founded that company suddenly had lots of money. But instead of retiring early they started a new company (Zerto) where they would design another disaster recovery software but with the experience gained from the first product. So Zerto is basically the logical next step from their old software. That is why Zerto is so great at scaling. It doesn't matter if you protect 10 or 1000 VMs with zerto. It just works.
+
+## How does Zerto work?
+
+Let's list some of the "Zerto terms":
+
+- ZVM (Zerto Virtual Manager)
+  - This is the central piece of Zerto. This is where the Web-GUI is running. You'll need one per vCenter
+- ZRA (Zerto Replication Appliace)
+  - This actually handles all the replication traffic from protected to recovery site. So you'll need at least one on each site. Recommended is one per hypervisor so VMs can switch hosts and still be proctected
+- VPG (Virtual Protection Group)
+  - This is where you group your VMs together that need to run in-sync with each other. This is the equivalent of a "Consistency group" when we talk about storage replication
+
+As you can see, it's pretty straight-forward. ZVM handles the GUI (which is HTML5 and very snappy), ZRA handles replication data and VPG is where you group your VMs and define target RPOs.
+
+## How do I install Zerto?
+
+That is so easy it's hardly worth even mentioning. You need a Windows Server with at least 4 GB disk space. The installation will ask you for the FQDN of your vCenter server and the credentials to log in. Installation is done within 5 minutes!
+
+After installation you'll need to connect to the Web-GUI for further configuration. This is a little out of the ordinary but the web-gui runs on port 9669. Just open up a browser and type in https://\<IP/DNS of your ZVM\>:9669 and you're ready to log in.
+
+Log in, provide a license (or pair with a site that already has a license) and you're ready to configure VRAs and VPGs.
+
+Installing VRAs is very simple. Even simpler when you use Zerto's API. The published a white-paper on their API usage and it has lots of examples in it. In the PoC we did we created about 100 ZRAs in a matter of minutes. (Manual installation would take a while longer, trust me.)
+
+After installing ZRAs you can start defining your VPGs. At least one VM per VPG. You can define lots of stuff in the VPGs like for instance when it will remind you to do a test-failover, target RPO, and so much more.
+
+## What's next?
+
+Well, if I got your interest in zerto and you'd like to talk more about it, hit me up on twitter or comment here.
+
+I will have to patiently wait for our customer to decide when they'll buy zerto (I'm very sure they will buy it that's why I said "when" and not "if". They were amazed by zerto during the PoC). And then I will help them set it up for production and will probably learn one or two more things about zerto.
+

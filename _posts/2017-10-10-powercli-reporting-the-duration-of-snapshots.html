@@ -1,0 +1,200 @@
+---
+layout: post
+title: 'PowerCLI: Reporting the duration of  Snapshots'
+date: 2017-10-10 13:11:57.000000000 +02:00
+type: post
+parent_id: '0'
+published: true
+password: ''
+status: publish
+categories:
+- PowerCLI
+- Scripting
+- virtualFrog Posts
+- VMware
+tags: []
+meta:
+  _rest_api_published: '1'
+  _rest_api_client_id: "-1"
+  _publicize_job_id: '10166750956'
+  _publicize_done_external: a:1:{s:7:"twitter";a:1:{i:9383931;s:56:"https://twitter.com/virtual_dd/status/917709284317782016";}}
+  _publicize_done_9340485: '1'
+  _wpas_done_9383931: '1'
+  publicize_twitter_user: virtual_dd
+  publicize_linkedin_url: https://www.linkedin.com/updates?discuss=&scope=391645417&stype=M&topic=6323474976993214464&type=U&a=6-f3
+  _publicize_done_14862392: '1'
+  _wpas_done_14749148: '1'
+  _thumbnail_id: '29'
+author:
+  login: virtualfrog
+  email: dario.doerflinger@gmail.com
+  display_name: virtualFrog
+  first_name: ''
+  last_name: ''
+permalink: "/2017/10/10/powercli-reporting-the-duration-of-snapshots/"
+---
+<p>One of our customers had a problem with VMs losing network connectivity while the backup was running. Their backup solution was based on VMware snapshots. After the end-users complained about a service not being responsive they investigated and found out that during the creation of the snapshot they lose the pings.</p>
+<p>In response they wanted to check how long the snapshots take on all of their VMs. Even though their environment was not very big, it would have been very tedious to gather this information manually. PowerCLI to the rescue!</p>
+<p><!--more--></p>
+<p>The script leverages Luc's awesome Get-TaskPlus function (which can be found <a href="http://www.lucd.info/2013/06/01/task-data-mining-an-improved-get-task/" target="_blank" rel="noopener">here</a>) with a few enhancements:</p>
+<ul>
+<li>The time from the events are converted to local time (instead of UTC)</li>
+<li>Some try/catch to filter exceptions</li>
+</ul>
+<p>Then it was just a matter of filtering for the correct task objects and selecting the desired properties. Because the customer wanted to see the time it took for the task to complete I've added a "New-Timespan" object to the select which calculates the total amount of seconds between "Task Started" and "Task completed".</p>
+<p>Update: this script is now published at <a href="https://github.com/virtualFrog/PowerCLI-Scripts" target="_blank" rel="noopener">GitHub</a>.</p>
+<p>Here is the script:</p>
+<p>[code language="powershell"]<br />
+# import vmware related modules, get the credentials and connect to the vCenter server<br />
+Import-Module -Name VMware.VimAutomation.Core -ErrorAction SilentlyContinue | Out-Null<br />
+#$creds = Get-VICredentialStoreItem -file  "D:\Scripts\CreateSnapshotCreationOverview\login.creds"<br />
+#Connect-VIServer -Server $creds.Host -User $creds.User -Password $creds.Password<br />
+connect-viserver vCenter.virtualfrog.lab</p>
+<p>function Get-TaskPlus {</p>
+<p> Get-TaskPlus -Start (Get-Date).AddDays(-1)<br />
+.EXAMPLE<br />
+  PS&gt; Get-TaskPlus -Alarm $alarm -Details<br />
+#&gt;</p>
+<p>  param(<br />
+    [CmdletBinding()]<br />
+    [VMware.VimAutomation.ViCore.Impl.V1.Alarm.AlarmDefinitionImpl]$Alarm,<br />
+    [VMware.VimAutomation.ViCore.Impl.V1.Inventory.InventoryItemImpl]$Entity,<br />
+    [switch]$Recurse = $false,<br />
+    [VMware.Vim.TaskInfoState[]]$State,<br />
+    [DateTime]$Start,<br />
+    [DateTime]$Finish,<br />
+    [string]$UserName,<br />
+    [int]$MaxSamples = 100,<br />
+    [switch]$Reverse = $true,<br />
+    [VMware.VimAutomation.ViCore.Impl.V1.VIServerImpl[]]$Server = $global:DefaultVIServer,<br />
+    [switch]$Realtime,<br />
+    [switch]$Details,<br />
+    [switch]$Keys,<br />
+    [int]$WindowSize = 100<br />
+  )</p>
+<p>  begin {<br />
+    function Get-TaskDetails {<br />
+      param(<br />
+        [VMware.Vim.TaskInfo[]]$Tasks<br />
+      )<br />
+      begin{<br />
+        $psV3 = $PSversionTable.PSVersion.Major -ge 3<br />
+      }</p>
+<p>      process{<br />
+        $tasks | %{<br />
+          if($psV3){<br />
+            $object = [ordered]@{}<br />
+          }<br />
+          else {<br />
+            $object = @{}<br />
+          }<br />
+          $object.Add("Name",$_.Name)<br />
+          $object.Add("Description",$_.Description.Message)<br />
+          if($Details){$object.Add("DescriptionId",$_.DescriptionId)}<br />
+          if($Details){$object.Add("Task Created",$_.QueueTime.tolocaltime())}<br />
+          $object.Add("Task Started",$_.StartTime.tolocaltime())<br />
+          if($Details){$object.Add("Task Ended",$_.CompleteTime.tolocaltime())}<br />
+          $object.Add("State",$_.State)<br />
+          $object.Add("Result",$_.Result)<br />
+          $object.Add("Entity",$_.EntityName)<br />
+          $object.Add("VIServer",$VIObject.Name)<br />
+          $object.Add("Error",$_.Error.ocalizedMessage)<br />
+          if($Details){<br />
+            $object.Add("Cancelled",(&amp;{if($_.Cancelled){"Y"}else{"N"}}))<br />
+            $object.Add("Reason",$_.Reason.GetType().Name.Replace("TaskReason", ""))<br />
+            $object.Add("AlarmName",$_.Reason.AlarmName)<br />
+            $object.Add("AlarmEntity",$_.Reason.EntityName)<br />
+            $object.Add("ScheduleName",$_.Reason.Name)<br />
+            $object.Add("User",$_.Reason.UserName)<br />
+          }<br />
+          if($keys){<br />
+            $object.Add("Key",$_.Key)<br />
+            $object.Add("ParentKey",$_.ParentTaskKey)<br />
+            $object.Add("RootKey",$_.RootTaskKey)<br />
+          }</p>
+<p>          New-Object PSObject -Property $object<br />
+        }<br />
+      }<br />
+    }</p>
+<p>    $filter = New-Object VMware.Vim.TaskFilterSpec<br />
+    if($Alarm){<br />
+      $filter.Alarm = $Alarm.ExtensionData.MoRef<br />
+    }<br />
+    if($Entity){<br />
+      $filter.Entity = New-Object VMware.Vim.TaskFilterSpecByEntity<br />
+      $filter.Entity.entity = $Entity.ExtensionData.MoRef<br />
+      if($Recurse){<br />
+        $filter.Entity.Recursion = [VMware.Vim.TaskFilterSpecRecursionOption]::all<br />
+      }<br />
+      else{<br />
+        $filter.Entity.Recursion = [VMware.Vim.TaskFilterSpecRecursionOption]::self<br />
+      }<br />
+    }<br />
+    if($State){<br />
+      $filter.State = $State<br />
+    }<br />
+    if($Start -or $Finish){<br />
+      $filter.Time = New-Object VMware.Vim.TaskFilterSpecByTime<br />
+      $filter.Time.beginTime = $Start<br />
+      $filter.Time.endTime = $Finish<br />
+      $filter.Time.timeType = [vmware.vim.taskfilterspectimeoption]::startedTime<br />
+    }<br />
+    if($UserName){<br />
+      $userNameFilterSpec = New-Object VMware.Vim.TaskFilterSpecByUserName<br />
+      $userNameFilterSpec.UserList = $UserName<br />
+      $filter.UserName = $userNameFilterSpec<br />
+    }<br />
+    $nrTasks = 0<br />
+  }</p>
+<p>  process {<br />
+    foreach($viObject in $Server){<br />
+      $si = Get-View ServiceInstance -Server $viObject<br />
+      $tskMgr = Get-View $si.Content.TaskManager -Server $viObject </p>
+<p>      if($Realtime -and $tskMgr.recentTask){<br />
+        $tasks = Get-View $tskMgr.recentTask<br />
+        $selectNr = [Math]::Min($tasks.Count,$MaxSamples-$nrTasks)<br />
+        Get-TaskDetails -Tasks[0..($selectNr-1)]<br />
+        $nrTasks += $selectNr<br />
+      }</p>
+<p>      try {<br />
+      $tCollector = Get-View ($tskMgr.CreateCollectorForTasks($filter))</p>
+<p>      if($Reverse){<br />
+        $tCollector.ResetCollector()<br />
+        $taskReadOp = $tCollector.ReadPreviousTasks<br />
+      }<br />
+      else{<br />
+        $taskReadOp = $tCollector.ReadNextTasks<br />
+      }<br />
+      do{<br />
+        $tasks = $taskReadOp.Invoke($WindowSize)<br />
+        if(!$tasks){return}<br />
+        $selectNr = [Math]::Min($tasks.Count,$MaxSamples-$nrTasks)<br />
+        Get-TaskDetails -Tasks $tasks[0..($selectNr-1)]<br />
+        $nrTasks += $selectNr<br />
+      }while($nrTasks -lt $MaxSamples)<br />
+      }<br />
+      catch {<br />
+        Write-Host "A error occured in the collector"<br />
+      }<br />
+    }<br />
+    try {<br />
+        $tCollector.DestroyCollector()<br />
+        }<br />
+    catch {<br />
+        Write-Host "The error not letting us destroy the collector"<br />
+    }<br />
+  }<br />
+}<br />
+$start = (Get-Date).AddDays(-30)<br />
+$finish = (Get-Date)<br />
+$output = Get-TaskPlus -Details -MaxSamples 20000000 -Start $start -Finish $finish<br />
+| ? {$_.Name -match "CreateSnapshot_Task" -or $_.Name -match "RemoveSnapshot_Task"}<br />
+|select Entity, "Task Created", "Task Started", "Task Ended", User, State, Name,<br />
+@{Name="Duration in Seconds"; Expression = {(New-TimeSpan -start $_."Task Started" -End $_."Task Ended").TotalSeconds}}<br />
+# create a CSV file with all snapshot related results<br />
+$output | Export-Csv -Path "c:\temp\snapshot_create_and_remove_times_last_month.csv" -NoTypeInformation</p>
+<p># cleanup and removal of loaded VMware modules<br />
+#Disconnect-VIServer -Server $creds.Host -Confirm:$false<br />
+disconnect-viserver vCenter.virtualfrog.lab -confirm:$false<br />
+Remove-Module -Name VMware.VimAutomation.Core -ErrorAction SilentlyContinue | Out-Null<br />
+[/code]</p>

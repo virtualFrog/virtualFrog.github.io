@@ -1,0 +1,40 @@
+---
+layout: post
+title: 'Back to basics: removing the clutter'
+date: 2019-07-26 21:20:48.000000000 +02:00
+type: post
+parent_id: '0'
+published: true
+password: ''
+status: publish
+categories:
+- virtualFrog Posts
+tags: []
+meta:
+  _wpas_skip_22130612: '1'
+  _wpas_skip_9383931: '1'
+  _rest_api_published: '1'
+  _rest_api_client_id: "-1"
+  timeline_notification: '1564168852'
+  _thumbnail_id: '1352'
+  _publicize_job_id: '33306129827'
+author:
+  login: virtualfrog
+  email: dario.doerflinger@gmail.com
+  display_name: virtualFrog
+  first_name: ''
+  last_name: ''
+permalink: "/2019/07/26/back-to-basics-removing-the-clutter/"
+---
+I have just cleaned up my blog. It started to bug me that a majority of the content on my blog was reposts from the VMware advocacy community. This is not to say that the advocacy community isn't good. It is great in fact and I will keep posting things from there through my other channels (twitter, linkedin) but not through my blog any longer.
+
+The content on my blog should come from me and me alone.
+
+<!--more-->
+
+I have just realized that I haven't been able to publish anything lately. I hope to change that in the near future.
+
+I have now been at BUSINESS IT AG for about three months. Time flies fast when you love that you do and have lots of stuff to do. I have learned a huge amount of cool new stuff that I am very excited to share and I have also written some very cool scripts that I will try to publish on my Github as well.
+
+&nbsp;
+
